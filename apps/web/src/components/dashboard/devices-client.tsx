@@ -80,9 +80,21 @@ export function DevicesClient({ devices }: { devices: DeviceItem[] }) {
             Multi-SIM SMS collector devices running hardware-backed EC P-256 signatures for Tier C settlement.
           </p>
         </div>
-        <Button onClick={() => { setPairOpen(true); setQrData(null); }} className="gap-2">
-          <Plus className="w-4 h-4" /> Pair Android Device
-        </Button>
+        <div className="flex items-center gap-2">
+          <a
+            href="https://github.com/rhythmkhan/denaneya/releases/download/v1.0.0/denaneya-collector-v1.0.0.apk"
+            target="_blank"
+            rel="noopener noreferrer"
+            download
+          >
+            <Button variant="outline" className="gap-2 text-xs border-emerald-600/40 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400">
+              <Smartphone className="w-4 h-4 text-emerald-600" /> Download APK (v1.0.0)
+            </Button>
+          </a>
+          <Button onClick={() => { setPairOpen(true); setQrData(null); }} className="gap-2">
+            <Plus className="w-4 h-4" /> Pair Android Device
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

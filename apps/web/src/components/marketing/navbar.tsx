@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { Menu, X, ShieldCheck, ArrowRight } from 'lucide-react';
+import { Menu, X, ShieldCheck, ArrowRight, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export function Navbar() {
@@ -50,6 +50,15 @@ export function Navbar() {
               <ShieldCheck className="w-4 h-4 text-emerald-600" />
               Security
             </Link>
+            <a
+              href="https://github.com/rhythmkhan/denaneya/releases/download/v1.0.0/denaneya-collector-v1.0.0.apk"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-semibold px-2.5 py-1 rounded-full border border-emerald-600/30 bg-emerald-50/60 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 transition flex items-center gap-1"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              Android APK
+            </a>
           </nav>
         </div>
 
@@ -98,6 +107,15 @@ export function Navbar() {
             <Link href="/security" onClick={() => setMobileMenuOpen(false)} className="px-2 py-1.5 hover:text-emerald-600">
               Security Architecture
             </Link>
+            <a
+              href="https://github.com/rhythmkhan/denaneya/releases/download/v1.0.0/denaneya-collector-v1.0.0.apk"
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setMobileMenuOpen(false)}
+              className="px-2 py-1.5 font-semibold text-emerald-600 flex items-center gap-2"
+            >
+              <Smartphone className="w-4 h-4" /> Download Android APK (v1.0.0)
+            </a>
           </nav>
           <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex flex-col gap-2">
             <Link href="/login" onClick={() => setMobileMenuOpen(false)}>
