@@ -1,0 +1,376 @@
+erDiagram
+    merchants ||--o{ merchant_memberships : "has members"
+    merchants ||--o{ api_keys : "owns"
+    merchants ||--o{ payment_links : "creates"
+    merchants ||--o{ invoices : "issues"
+    merchants ||--o{ payments : "receives"
+    merchants ||--o{ refunds : "authorizes"
+    merchants ||--o{ ledger_accounts : "maintains"
+    merchants ||--o{ ledger_transactions : "records"
+    merchants ||--o{ collector_devices : "pairs"
+    merchants ||--o{ collector_events : "audits"
+    merchants ||--o{ sms_messages : "associates"
+    merchants ||--o{ webhook_subscriptions : "registers"
+    merchants ||--o{ webhook_deliveries : "receives logs"
+    merchants ||--o{ outbox_events : "enqueues"
+    merchants ||--o{ fraud_evaluations : "evaluates"
+    merchants ||--o{ review_cases : "manages"
+    merchants ||--o{ audit_logs : "tracks"
+
+    users ||--o{ merchant_memberships : "belongs to"
+    users ||--o{ accounts : "authenticates with"
+    users ||--o{ sessions : "holds"
+    users ||--o{ review_cases : "acts as maker/checker"
+
+    invoices ||--o{ invoice_items : "contains"
+    payment_links ||--o{ payments : "initiates"
+    invoices ||--o| payments : "settled by"
+    payments ||--o{ refunds : "has"
+    payments ||--o| fraud_evaluations : "scored by"
+    payments ||--o| review_cases : "reviewed in"
+
+    ledger_transactions ||--|{ ledger_entries : "composed of"
+    ledger_accounts ||--o{ ledger_entries : "posted to"
+
+    collector_devices ||--o{ collector_events : "submits"
+    collector_devices ||--o{ sms_messages : "captures"
+    sms_messages ||--o| payments : "consumed by"
+
+    webhook_subscriptions ||--o{ webhook_deliveries : "triggers"
+
+    merchants {
+        text id PK "mch_16"
+        text name
+        text business_name
+        text business_type
+        text email UK
+        text phone
+        text kyc_status
+        text status
+        text default_currency
+        text environment
+        integer fee_rate_bps
+        bigint fixed_fee_paisa
+        text webhook_secret
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    users {
+        text id PK "usr_16"
+        text email UK
+        text name
+        text phone
+        text password_hash
+        boolean mfa_enabled
+        text mfa_secret
+        text status
+        boolean is_super_admin
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    merchant_memberships {
+        text id PK "mem_16"
+        text merchant_id FK
+        text user_id FK
+        text role
+        text status
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    api_keys {
+        text id PK "key_16"
+        text merchant_id FK
+        text name
+        text key_prefix
+        text key_hash
+        text type
+        text environment
+        jsonb scopes
+        timestamp last_used_at
+        timestamp expires_at
+        timestamp revoked_at
+        timestamp created_at
+    }
+
+    accounts {
+        text id PK
+        text user_id FK
+        text type
+        text provider
+        text provider_account_id
+    }
+
+    sessions {
+        text id PK
+        text session_token UK
+        text user_id FK
+        timestamp expires
+    }
+
+    verification_tokens {
+        text identifier PK
+        text token PK
+        timestamp expires
+    }
+
+    payment_links {
+        text id PK "plk_16"
+        text merchant_id FK
+        text title
+        text slug UK
+        bigint amount_paisa
+        text currency
+        text type
+        text status
+        jsonb allowed_providers
+        integer max_uses
+        integer used_count
+        timestamp expires_at
+        timestamp created_at
+    }
+
+    invoices {
+        text id PK "inv_16"
+        text merchant_id FK
+        text invoice_number
+        text customer_name
+        text customer_email
+        text customer_phone
+        bigint subtotal_paisa
+        bigint tax_paisa
+        bigint discount_paisa
+        bigint total_amount_paisa
+        text currency
+        text status
+        timestamp due_date
+        timestamp paid_at
+        text payment_id FK
+        timestamp created_at
+    }
+
+    invoice_items {
+        text id PK "itm_16"
+        text invoice_id FK
+        text description
+        integer quantity
+        bigint unit_price_paisa
+        integer tax_rate_bps
+        bigint total_paisa
+        timestamp created_at
+    }
+
+    payments {
+        text id PK "pay_16"
+        text merchant_id FK
+        bigint amount_paisa
+        text currency
+        text status
+        bigint fee_paisa
+        bigint refunded_amount_paisa
+        text customer_name
+        text customer_email
+        text customer_phone
+        text provider
+        text provider_trx_id
+        text provider_session_id
+        text idempotency_key
+        text payment_link_id FK
+        text invoice_id FK
+        text verified_tier
+        integer risk_score
+        integer version
+        timestamp settled_at
+        timestamp expires_at
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    refunds {
+        text id PK "ref_16"
+        text payment_id FK
+        text merchant_id FK
+        bigint amount_paisa
+        text currency
+        text status
+        text reason
+        text provider_refund_id
+        text idempotency_key
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    ledger_accounts {
+        text id PK "acc_code"
+        text merchant_id FK
+        text code
+        text name
+        text type
+        text normal_balance
+        text currency
+        boolean is_active
+        timestamp created_at
+    }
+
+    ledger_transactions {
+        text id PK "ltx_16"
+        text merchant_id FK
+        text transaction_type
+        text reference_type
+        text reference_id
+        text idempotency_key UK
+        text description
+        timestamp posted_at
+        timestamp created_at
+    }
+
+    ledger_entries {
+        text id PK "len_16"
+        text transaction_id FK
+        text account_id FK
+        text direction
+        bigint amount_paisa
+        text currency
+        timestamp created_at
+    }
+
+    collector_devices {
+        text id PK "dev_16"
+        text device_id UK
+        text merchant_id FK
+        text device_name
+        text model
+        text os_version
+        text app_version
+        text public_key_hex
+        bigint sequence_number
+        jsonb sim_slots
+        jsonb assigned_wallets
+        integer battery_level
+        boolean is_charging
+        text network_type
+        text status
+        text pairing_token_hash
+        timestamp last_heartbeat_at
+        timestamp created_at
+    }
+
+    collector_events {
+        text id PK "evt_16"
+        text device_id FK
+        text merchant_id FK
+        bigint sequence_number
+        text nonce
+        text event_type
+        jsonb payload
+        text signature
+        bigint timestamp
+        text status
+        timestamp created_at
+    }
+
+    sms_messages {
+        text id PK "sms_16"
+        text merchant_id FK
+        text device_id FK
+        text provider
+        text sender
+        text text
+        bigint amount_paisa
+        text trx_id
+        text counterparty_msisdn
+        bigint rolling_balance_paisa
+        bigint fee_paisa
+        text hash UK
+        text parser_version
+        integer sim_slot
+        boolean is_consumed
+        text consumed_by_payment_id FK
+        timestamp received_at
+        timestamp created_at
+    }
+
+    webhook_subscriptions {
+        text id PK "whs_16"
+        text merchant_id FK
+        text url
+        text secret
+        jsonb events
+        text status
+        integer failure_count
+        timestamp last_delivery_at
+        timestamp created_at
+    }
+
+    webhook_deliveries {
+        text id PK "whd_16"
+        text subscription_id FK
+        text merchant_id FK
+        text event_id
+        text event_type
+        jsonb payload
+        integer response_status
+        text response_body
+        integer attempt
+        text status
+        timestamp next_retry_at
+        timestamp created_at
+    }
+
+    outbox_events {
+        text id PK "obx_16"
+        text merchant_id FK
+        text event_type
+        jsonb payload
+        text status
+        integer retry_count
+        timestamp scheduled_at
+        timestamp processed_at
+        timestamp created_at
+    }
+
+    fraud_evaluations {
+        text id PK "frd_16"
+        text payment_id FK
+        text merchant_id FK
+        integer risk_score
+        text classification
+        text action_taken
+        jsonb triggered_rules
+        timestamp evaluated_at
+        timestamp created_at
+    }
+
+    review_cases {
+        text id PK "rcs_16"
+        text payment_id FK
+        text merchant_id FK
+        text status
+        text reason
+        text maker_id FK
+        text maker_recommendation
+        text maker_notes
+        timestamp maker_decided_at
+        text checker_id FK
+        text checker_decision
+        text checker_notes
+        timestamp checker_decided_at
+        timestamp created_at
+    }
+
+    audit_logs {
+        text id PK "aud_16"
+        text merchant_id FK
+        text actor_id
+        text actor_type
+        text action
+        text resource_type
+        text resource_id
+        text previous_hash
+        text current_hash
+        jsonb payload
+        timestamp timestamp
+        timestamp created_at
+    }

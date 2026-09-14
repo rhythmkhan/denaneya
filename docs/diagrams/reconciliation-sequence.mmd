@@ -1,0 +1,52 @@
+sequenceDiagram
+    autonumber
+    actor Admin as Admin Operator / Cron Trigger
+    participant ReconAPI as Reconciliation API (/api/v1/reconciliation/run)
+    participant ReconEngine as 3-Way Reconciliation Engine
+    participant InternalDB as DenaNeya Internal Records (payments)
+    participant UpstreamFeed as Provider Settlement Batches (SSLCOMMERZ/bKash)
+    participant LedgerDB as Double-Entry Ledger (ledger_entries)
+    participant ReportDB as Reports & Discrepancies DB
+
+    Admin->>ReconAPI: POST /api/v1/reconciliation/run (startDate, endDate, provider)
+    ReconAPI->>ReconEngine: executeBatchReconciliation(jobId, dateRange, provider)
+    
+    par Query Internal Payments
+        ReconEngine->>InternalDB: SELECT id, providerTrxId, amountPaisa, status FROM payments WHERE settledAt BETWEEN start AND end
+        InternalDB-->>ReconEngine: internalRecords (List of payments)
+    and Query Upstream Gateway Statements
+        ReconEngine->>UpstreamFeed: Fetch settlement batch / statement entries
+        UpstreamFeed-->>ReconEngine: providerRecords (List of gateway settlement rows)
+    and Query Ledger Postings
+        ReconEngine->>LedgerDB: SELECT referenceId, amountPaisa, direction FROM ledger_entries WHERE referenceType='PAYMENT'
+        LedgerDB-->>ReconEngine: ledgerRecords (List of journal debit/credit lines)
+    end
+
+    loop Tri-Directional Comparison for each Transaction
+        ReconEngine->>ReconEngine: Compare amounts (Paisa zero-float math)
+        ReconEngine->>ReconEngine: Compare status (Internal COMPLETED vs Gateway SETTLED)
+        ReconEngine->>ReconEngine: Verify double-entry ledger balance (Debits == Credits)
+        
+        alt All 3 Records Match
+            ReconEngine->>ReconEngine: Classify: MATCHED
+        else Internal Amount != Gateway Amount
+            ReconEngine->>ReconEngine: Classify: AMOUNT_MISMATCH
+        else Internal COMPLETED but Gateway FAILED/MISSING
+            ReconEngine->>ReconEngine: Classify: STATUS_MISMATCH / MISSING_IN_GATEWAY
+        else Gateway Settled but Missing in Ledger
+            ReconEngine->>ReconEngine: Classify: MISSING_IN_LEDGER
+        else Unexpected Gateway Transaction
+            ReconEngine->>ReconEngine: Classify: UNEXPECTED_GATEWAY_TX
+        else Provider MDR Fee Variance
+            ReconEngine->>ReconEngine: Classify: FEE_DISCREPANCY
+        end
+    end
+
+    rect rgb(240, 248, 255)
+        note over ReconEngine,ReportDB: Persist Reconciliation Results
+        ReconEngine->>ReportDB: INSERT INTO reconciliation_runs (id, total_records_evaluated, matched_count, discrepancy_count)
+        ReconEngine->>ReportDB: INSERT INTO reconciliation_discrepancies (jobId, paymentId, discrepancyType, variancePaisa)
+    end
+
+    ReconEngine-->>ReconAPI: 200 OK (Batch Summary: 1,418 Matched, 2 Discrepancies)
+    ReconAPI-->>Admin: Render Reconciliation Summary & Discrepancy Action List

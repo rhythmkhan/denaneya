@@ -1,0 +1,52 @@
+sequenceDiagram
+    autonumber
+    actor Customer
+    participant MerchantServer as Merchant Backend
+    participant DenaNeyaAPI as DenaNeya REST API (/api/v1/payments)
+    participant FraudEngine as Anti-Fraud Engine
+    participant DB as Neon PostgreSQL
+    participant GatewayAdapter as Gateway Adapter
+    participant UpstreamGW as Payment Gateway (SSLCOMMERZ / bKash)
+    participant Outbox as Webhook Outbox & QStash
+
+    MerchantServer->>DenaNeyaAPI: POST /api/v1/payments (Idempotency-Key, amountPaisa, customer)
+    DenaNeyaAPI->>DenaNeyaAPI: Authenticate API Key (Bearer dn_live_sec_...) & Rate Limit
+    DenaNeyaAPI->>FraudEngine: evaluate(paymentParams)
+    FraudEngine-->>DenaNeyaAPI: RiskScore: 10, Action: ALLOW
+    DenaNeyaAPI->>GatewayAdapter: initiatePayment(paymentId, amountPaisa, returnUrl)
+    GatewayAdapter->>UpstreamGW: Provider Session Init API
+    UpstreamGW-->>GatewayAdapter: sessionToken, providerRedirectUrl
+    GatewayAdapter-->>DenaNeyaAPI: gatewayResult (redirectUrl, providerSessionId)
+    
+    rect rgb(240, 248, 255)
+        note over DenaNeyaAPI,DB: Atomic Database Transaction
+        DenaNeyaAPI->>DB: INSERT INTO payments (status: 'REQUIRES_ACTION', providerSessionId, ...)
+        DenaNeyaAPI->>DB: INSERT INTO outbox_events (eventType: 'payment.created')
+    end
+
+    DenaNeyaAPI-->>MerchantServer: 201 Created (paymentId, redirectUrl)
+    MerchantServer-->>Customer: Redirect to DenaNeya Hosted Checkout
+    Customer->>DenaNeyaAPI: Loads Checkout UI, selects provider (e.g. bKash)
+    Customer->>UpstreamGW: Redirected to Gateway Payment Page
+    Customer->>UpstreamGW: Enters PIN / OTP & confirms payment
+    UpstreamGW-->>Customer: Payment Successful! Redirects to Return URL
+
+    UpstreamGW->>DenaNeyaAPI: POST /api/v1/gateways/ipn (Gateway Webhook / IPN)
+    DenaNeyaAPI->>GatewayAdapter: verifyPayment(providerTrxId, payload)
+    GatewayAdapter->>UpstreamGW: Query/Validate Transaction API
+    UpstreamGW-->>GatewayAdapter: status: SUCCESS, providerTrxId: '9K76TRX01'
+
+    rect rgb(235, 255, 235)
+        note over DenaNeyaAPI,DB: Single Atomic Settlement Transaction
+        DenaNeyaAPI->>DB: UPDATE payments SET status='COMPLETED', providerTrxId='9K76TRX01', settledAt=NOW()
+        DenaNeyaAPI->>DB: INSERT INTO ledger_transactions (type: 'PAYMENT_CAPTURE')
+        DenaNeyaAPI->>DB: INSERT INTO ledger_entries (DEBIT Clearing, CREDIT Merchant Payable, CREDIT Fee Revenue)
+        DenaNeyaAPI->>DB: INSERT INTO outbox_events (eventType: 'payment.completed')
+    end
+
+    DenaNeyaAPI-->>UpstreamGW: 200 OK (IPN Acknowledged)
+    Customer->>DenaNeyaAPI: Arrives at Checkout Success Page
+    DenaNeyaAPI-->>Customer: Render Settlement Receipt ("দেনা-নেওয়া সহজ, হিসাব নিশ্চিত।")
+
+    Outbox->>MerchantServer: POST merchantWebhookUrl (HMAC-SHA256 signed 'payment.completed')
+    MerchantServer-->>Outbox: 200 OK

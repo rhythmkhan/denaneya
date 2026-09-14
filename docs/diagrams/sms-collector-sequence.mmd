@@ -1,0 +1,51 @@
+sequenceDiagram
+    autonumber
+    actor Payer as Payer (Customer)
+    participant Telco as Telco SMS Network (Grameenphone/Robi/Banglalink)
+    participant AndroidApp as Android App (Jetpack Compose)
+    participant Keystore as Hardware Keystore (EC P-256)
+    participant RoomDB as Local Encrypted Room DB
+    participant WorkManager as Background WorkManager
+    participant CollectorAPI as DenaNeya API (/api/v1/devices/sms)
+    participant SmsParser as Versioned SMS Parser Engine
+    participant DB as Neon PostgreSQL
+    participant Ledger as Double-Entry Ledger Engine
+
+    Payer->>Telco: Sends Money via bKash / Nagad USSD/App
+    Telco->>AndroidApp: Delivers Incoming SMS to Collector Phone
+    AndroidApp->>AndroidApp: BroadcastReceiver intercepts SMS
+    AndroidApp->>AndroidApp: Increment monotonic sequenceNumber (seq = seq + 1)
+    AndroidApp->>AndroidApp: Generate 128-bit UUID nonce & timestamp
+    AndroidApp->>Keystore: Sign canonical JSON [deviceId, seq, nonce, ts, payload]
+    Keystore-->>AndroidApp: ECDSA P-256 Base64 Signature
+    AndroidApp->>RoomDB: Store signed event in offline encrypted queue
+
+    WorkManager->>RoomDB: Dequeue pending signed events
+    WorkManager->>CollectorAPI: POST /api/v1/devices/sms (canonical payload + signature)
+
+    rect rgb(255, 245, 240)
+        note over CollectorAPI,DB: Strict Hardware Attestation & Anti-Replay Checks
+        CollectorAPI->>CollectorAPI: Freshness check (|now - ts| <= 300s)
+        CollectorAPI->>DB: SELECT publicKeyHex, sequenceNumber FROM collector_devices WHERE id=deviceId
+        CollectorAPI->>CollectorAPI: Verify seq > device.sequenceNumber (monotonicity)
+        CollectorAPI->>DB: SELECT 1 FROM collector_events WHERE deviceId=id AND nonce=nonce
+        CollectorAPI->>CollectorAPI: Verify ECDSA signature against device.publicKeyHex
+    end
+
+    CollectorAPI->>SmsParser: parseMfsSms(sender, messageText)
+    SmsParser-->>CollectorAPI: ParsedSmsResult (provider, trxId, amountPaisa, balance, hash)
+
+    rect rgb(240, 255, 240)
+        note over CollectorAPI,DB: Deduplication & Atomic Settlement
+        CollectorAPI->>DB: Check uniqueness: SELECT 1 FROM sms_messages WHERE hash=parsedHash
+        CollectorAPI->>DB: INSERT INTO sms_messages (hash, provider, trxId, amountPaisa, status: 'PARSED')
+        CollectorAPI->>DB: SELECT id FROM payments WHERE status='REQUIRES_ACTION' AND amountPaisa=parsedAmount
+        CollectorAPI->>DB: UPDATE sms_messages SET is_consumed=TRUE, consumed_by_payment_id=payId
+        CollectorAPI->>DB: UPDATE payments SET status='COMPLETED', providerTrxId=trxId, settledAt=NOW()
+        CollectorAPI->>Ledger: postTransaction(PAYMENT_CAPTURE, entries=[DEBIT Cash, CREDIT Payable])
+        CollectorAPI->>DB: INSERT INTO outbox_events (eventType: 'payment.completed')
+        CollectorAPI->>DB: INSERT INTO collector_events (record nonce & sequence)
+    end
+
+    CollectorAPI-->>WorkManager: 200 OK (status: 'PROCESSED', matchedPaymentId)
+    WorkManager->>RoomDB: Remove event from local queue

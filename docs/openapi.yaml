@@ -1,0 +1,1916 @@
+openapi: 3.1.0
+info:
+  title: DenaNeya Payment Orchestration API
+  version: 1.0.0
+  description: 'Production-grade, multi-tenant payment management and orchestration
+    REST API for Bangladesh.
+
+
+    Routes payments across commercial merchants, Mobile Financial Services (bKash,
+    Nagad, Rocket, Upay), and payment aggregators (SSLCOMMERZ, shurjoPay, aamarPay).
+    Operates in SOFTWARE/ORCHESTRATION mode without custodial holding of funds.
+
+
+    All monetary values are strictly represented in zero-float integer minor units
+    (paisa), where 1 BDT = 100 paisa.
+
+
+    Brand: ''দেনা-নেওয়া সহজ, হিসাব নিশ্চিত।'''
+  contact:
+    name: DenaNeya Developer Relations
+    email: support@denaneya.com
+    url: https://denaneya.com
+  license:
+    name: Proprietary
+    url: https://denaneya.com/terms
+servers:
+- url: https://api.denaneya.com
+  description: Live Production Environment
+- url: https://sandbox-api.denaneya.com
+  description: Merchant Sandbox Simulator
+- url: http://localhost:3000
+  description: Local Development Server
+tags:
+- name: Payments
+  description: Payment creation, retrieval, listing, and refunds
+- name: Payment Links
+  description: Single-use and multi-use hosted payment URLs
+- name: Invoices
+  description: Digital invoicing, multi-line item billing, and reminders
+- name: Webhooks
+  description: Webhook subscription management and SSRF-validated endpoints
+- name: Devices
+  description: Android MFS SMS collector pairing, hardware attestation, and heartbeats
+- name: Gateways
+  description: Real-time provider health checks and operational telemetry
+- name: Reconciliation
+  description: Three-way financial reconciliation jobs and discrepancy reports
+paths:
+  /api/v1/payments:
+    post:
+      tags:
+      - Payments
+      summary: Create payment or replay existing
+      description: Initializes a payment intent across integrated payment gateways
+        or MFS direct wallets. Enforces idempotency via the Idempotency-Key header.
+        Automatically evaluates the payment against the 12-rule Anti-Fraud Engine.
+      operationId: createPayment
+      security:
+      - BearerAuth:
+        - payments:write
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: false
+        description: Unique key (1-128 characters) guaranteeing exactly-once payment
+          processing.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentRequest'
+      responses:
+        '201':
+          description: Payment created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '200':
+          description: Idempotent replay of previously completed request
+          headers:
+            Idempotent-Replayed:
+              schema:
+                type: boolean
+              description: True if response was served from idempotent cache
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    get:
+      tags:
+      - Payments
+      summary: List paginated payments
+      description: Retrieves a paginated list of payments for the authenticated merchant
+        with filtering by status and date range.
+      operationId: listPayments
+      security:
+      - BearerAuth:
+        - payments:read
+      parameters:
+      - name: limit
+        in: query
+        description: Number of records to return (1-100)
+        schema:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+      - name: offset
+        in: query
+        description: Number of records to skip
+        schema:
+          type: integer
+          default: 0
+          minimum: 0
+      - name: status
+        in: query
+        description: Filter by payment status
+        schema:
+          $ref: '#/components/schemas/PaymentStatus'
+      - name: from
+        in: query
+        description: Start timestamp (ISO-8601)
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        description: End timestamp (ISO-8601)
+        schema:
+          type: string
+          format: date-time
+      responses:
+        '200':
+          description: List of payments
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - data
+                - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PaymentListItem'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /api/v1/payments/{id}:
+    get:
+      tags:
+      - Payments
+      summary: Retrieve payment by ID
+      description: Retrieves detailed information for a specific payment, including
+        customer profile, timeline, fee deductions, net settlement, and refund history.
+      operationId: getPaymentById
+      security:
+      - BearerAuth:
+        - payments:read
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Payment ID
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Payment details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentDetailResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /api/v1/payments/{id}/refund:
+    post:
+      tags:
+      - Payments
+      summary: Refund payment
+      description: Initiates a full or partial refund against a COMPLETED payment.
+        Posts balanced double-entry ledger entries and dispatches refund webhooks.
+      operationId: refundPayment
+      security:
+      - BearerAuth:
+        - payments:write
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Payment ID to refund
+        schema:
+          type: string
+      - name: Idempotency-Key
+        in: header
+        required: false
+        description: Unique idempotency key
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRefundRequest'
+      responses:
+        '201':
+          description: Refund processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefundResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /api/v1/payment-links:
+    post:
+      tags:
+      - Payment Links
+      summary: Create payment link
+      description: Generates a shareable hosted checkout link with customizable branding,
+        expiration, and usage limits.
+      operationId: createPaymentLink
+      security:
+      - BearerAuth:
+        - payment_links:write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentLinkRequest'
+      responses:
+        '201':
+          description: Payment link created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentLinkResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    get:
+      tags:
+      - Payment Links
+      summary: List payment links
+      description: Lists paginated payment links for the authenticated merchant.
+      operationId: listPaymentLinks
+      security:
+      - BearerAuth:
+        - payment_links:read
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 20
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          default: 0
+      responses:
+        '200':
+          description: List of payment links
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - data
+                - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PaymentLinkResponse'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/payment-links/{id}:
+    get:
+      tags:
+      - Payment Links
+      summary: Retrieve payment link
+      description: Retrieves payment link configuration, view counts, and usage stats.
+      operationId: getPaymentLinkById
+      security:
+      - BearerAuth:
+        - payment_links:read
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Payment Link ID
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Payment link retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentLinkResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - Payment Links
+      summary: Deactivate payment link
+      description: Deactivates an active payment link, preventing subsequent customer
+        checkout attempts.
+      operationId: deactivatePaymentLink
+      security:
+      - BearerAuth:
+        - payment_links:write
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Payment Link ID
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Payment link deactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccessResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/invoices:
+    post:
+      tags:
+      - Invoices
+      summary: Create digital invoice
+      description: Creates a multi-line item tax invoice with strict line-item mathematical
+        verification.
+      operationId: createInvoice
+      security:
+      - BearerAuth:
+        - invoices:write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInvoiceRequest'
+      responses:
+        '201':
+          description: Invoice created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    get:
+      tags:
+      - Invoices
+      summary: List invoices
+      description: Queries paginated invoices with optional status filtering.
+      operationId: listInvoices
+      security:
+      - BearerAuth:
+        - invoices:read
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 20
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          default: 0
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - DRAFT
+          - SENT
+          - PAID
+          - VOID
+          - OVERDUE
+      responses:
+        '200':
+          description: List of invoices
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - data
+                - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InvoiceResponse'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+  /api/v1/invoices/{id}:
+    get:
+      tags:
+      - Invoices
+      summary: Retrieve invoice
+      description: Retrieves invoice metadata, customer billing info, and all line
+        items.
+      operationId: getInvoiceById
+      security:
+      - BearerAuth:
+        - invoices:read
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Invoice retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+      - Invoices
+      summary: Update invoice
+      description: Modifies an invoice in DRAFT status or marks an invoice as SENT.
+      operationId: updateInvoice
+      security:
+      - BearerAuth:
+        - invoices:write
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateInvoiceRequest'
+      responses:
+        '200':
+          description: Invoice updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags:
+      - Invoices
+      summary: Cancel / void invoice
+      description: Marks an unpaid invoice as VOID.
+      operationId: voidInvoice
+      security:
+      - BearerAuth:
+        - invoices:write
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Invoice marked as VOID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccessResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/webhooks:
+    post:
+      tags:
+      - Webhooks
+      summary: Register webhook endpoint
+      description: Registers a new webhook subscription. Performs strict SSRF validation
+        to block private networks, localhost, cloud metadata (169.254.169.254), and
+        DNS rebinding attacks. Returns an HMAC-SHA256 signing secret shown only once.
+      operationId: createWebhookSubscription
+      security:
+      - BearerAuth:
+        - webhooks:write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWebhookRequest'
+      responses:
+        '201':
+          description: Webhook registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookCreatedResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    get:
+      tags:
+      - Webhooks
+      summary: List webhook subscriptions
+      description: Lists all webhook subscriptions registered for the authenticated
+        merchant.
+      operationId: listWebhooks
+      security:
+      - BearerAuth:
+        - webhooks:read
+      responses:
+        '200':
+          description: List of subscriptions
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WebhookSubscriptionResponse'
+  /api/v1/webhooks/{id}:
+    get:
+      tags:
+      - Webhooks
+      summary: Retrieve webhook subscription
+      description: Fetches a webhook subscription and delivery health statistics.
+      operationId: getWebhookById
+      security:
+      - BearerAuth:
+        - webhooks:read
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Webhook subscription details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookSubscriptionResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+      - Webhooks
+      summary: Update webhook subscription
+      description: Updates endpoint URL, subscribed event types, or active status.
+      operationId: updateWebhook
+      security:
+      - BearerAuth:
+        - webhooks:write
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWebhookRequest'
+      responses:
+        '200':
+          description: Webhook subscription updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookSubscriptionResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags:
+      - Webhooks
+      summary: Delete webhook subscription
+      description: Permanently removes a webhook subscription.
+      operationId: deleteWebhook
+      security:
+      - BearerAuth:
+        - webhooks:write
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Webhook subscription deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccessResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/devices:
+    get:
+      tags:
+      - Devices
+      summary: List collector devices
+      description: Lists all registered Android SMS collector devices, battery telemetry,
+        and wallet bindings.
+      operationId: listDevices
+      security:
+      - BearerAuth:
+        - devices:read
+      responses:
+        '200':
+          description: List of devices
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DeviceResponse'
+  /api/v1/devices/pair:
+    post:
+      tags:
+      - Devices
+      summary: Pair Android collector device
+      description: Completes pairing ceremony via QR token. Registers device hardware-backed
+        EC P-256 public key.
+      operationId: pairDevice
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DevicePairRequest'
+      responses:
+        '200':
+          description: Device paired successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccessResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/devices/sms:
+    post:
+      tags:
+      - Devices
+      summary: Ingest signed MFS SMS
+      description: Ingests raw MFS SMS notifications captured by paired Android devices.
+        Validates hardware EC P-256 attestation, anti-replay nonce, monotonic sequence,
+        and initiates atomic payment settlement.
+      operationId: ingestSms
+      security:
+      - DeviceSignature: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestSmsRequest'
+      responses:
+        '200':
+          description: SMS processed or duplicate safely acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestSmsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Event replay detected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/devices/heartbeat:
+    post:
+      tags:
+      - Devices
+      summary: Device telemetry heartbeat
+      description: Background check-in from Android collector reporting battery, network,
+        and sequence health.
+      operationId: deviceHeartbeat
+      security:
+      - DeviceSignature: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeartbeatRequest'
+      responses:
+        '200':
+          description: Heartbeat acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericSuccessResponse'
+  /api/v1/gateways/health:
+    get:
+      tags:
+      - Gateways
+      summary: Gateway health status
+      description: Queries real-time status and latency metrics across all upstream
+        payment gateway adapters.
+      operationId: getGatewayHealth
+      security:
+      - BearerAuth:
+        - gateways:read
+      responses:
+        '200':
+          description: Gateway health report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayHealthResponse'
+  /api/v1/reconciliation/run:
+    post:
+      tags:
+      - Reconciliation
+      summary: Run 3-way financial reconciliation
+      description: Triggers automated reconciliation comparing internal payments,
+        upstream provider settlement files, and double-entry ledger entries.
+      operationId: runReconciliation
+      security:
+      - BearerAuth:
+        - reconciliation:write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunReconciliationRequest'
+      responses:
+        '200':
+          description: Reconciliation completed
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/ReconciliationJobResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/reconciliation/reports:
+    get:
+      tags:
+      - Reconciliation
+      summary: List reconciliation discrepancy reports
+      description: Queries discrepancy reports and audit records generated during
+        reconciliation runs.
+      operationId: listReconciliationReports
+      security:
+      - BearerAuth:
+        - reconciliation:read
+      parameters:
+      - name: runId
+        in: query
+        schema:
+          type: string
+      - name: jobId
+        in: query
+        schema:
+          type: string
+      - name: batchId
+        in: query
+        schema:
+          type: string
+      - name: date
+        in: query
+        schema:
+          type: string
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - MATCHED
+          - DISCREPANCIES_DETECTED
+          - FAILED
+      - name: discrepancyType
+        in: query
+        schema:
+          type: string
+          enum:
+          - MATCHED
+          - AMOUNT_MISMATCH
+          - STATUS_MISMATCH
+          - MISSING_IN_LEDGER
+          - MISSING_IN_GATEWAY
+          - UNEXPECTED_GATEWAY_TX
+          - FEE_DISCREPANCY
+      - name: format
+        in: query
+        schema:
+          type: string
+          enum:
+          - json
+          - csv
+      responses:
+        '200':
+          description: Discrepancy reports
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - data
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: '#/components/schemas/ReconciliationJobResponse'
+            text/csv:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API Key (dn_live_sec_... / dn_test_sec_...)
+      description: API Key authentication. Prefix dn_live_sec_ for production, dn_test_sec_
+        for sandbox.
+    DeviceSignature:
+      type: apiKey
+      name: X-Device-Signature
+      in: header
+      description: Hardware ECDSA P-256 digital signature over canonical payload.
+  responses:
+    BadRequest:
+      description: Malformed request or syntax error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    Unauthorized:
+      description: Missing, expired, or invalid API key
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    Forbidden:
+      description: Insufficient permissions or fraud rejection
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    NotFound:
+      description: Requested resource was not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    ValidationError:
+      description: Validation failure on input parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    RateLimited:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds until retry allowed
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+    InternalServerError:
+      description: Unexpected platform error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiErrorResponse'
+  schemas:
+    ApiErrorCode:
+      type: string
+      enum:
+      - BAD_REQUEST
+      - UNAUTHORIZED
+      - API_KEY_REVOKED
+      - API_KEY_EXPIRED
+      - FORBIDDEN
+      - INSUFFICIENT_PERMISSIONS
+      - NOT_FOUND
+      - PAYMENT_NOT_FOUND
+      - EVENT_REPLAY_DETECTED
+      - INVALID_DEVICE_SIGNATURE
+      - INVALID_PAYMENT_STATE
+      - REFUND_EXCEEDS_CAPTURED
+      - VALIDATION_ERROR
+      - SSRF_VALIDATION_FAILED
+      - FRAUD_REJECTED
+      - RATE_LIMITED
+      - INTERNAL_SERVER_ERROR
+    ApiErrorResponse:
+      type: object
+      required:
+      - error
+      properties:
+        error:
+          type: object
+          required:
+          - code
+          - message
+          - requestId
+          properties:
+            code:
+              $ref: '#/components/schemas/ApiErrorCode'
+            message:
+              type: string
+            requestId:
+              type: string
+              example: req_1726270000
+            details:
+              type: object
+              additionalProperties: true
+    Pagination:
+      type: object
+      required:
+      - total
+      - limit
+      - offset
+      - hasMore
+      properties:
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        hasMore:
+          type: boolean
+    GenericSuccessResponse:
+      type: object
+      required:
+      - success
+      - message
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Operation completed successfully.
+    PaymentStatus:
+      type: string
+      enum:
+      - CREATED
+      - REQUIRES_ACTION
+      - PENDING
+      - PROCESSING
+      - UNDER_REVIEW
+      - COMPLETED
+      - FAILED
+      - CANCELLED
+      - EXPIRED
+      - PARTIALLY_REFUNDED
+      - REFUNDED
+    CustomerInfo:
+      type: object
+      properties:
+        name:
+          type: string
+          example: Tanvir Ahmed
+        email:
+          type: string
+          format: email
+          example: tanvir@example.com
+        phone:
+          type: string
+          example: 01712345678
+        billingAddress:
+          type: object
+          properties:
+            street:
+              type: string
+            city:
+              type: string
+            postalCode:
+              type: string
+            country:
+              type: string
+              default: BD
+    CreatePaymentRequest:
+      type: object
+      required:
+      - amountPaisa
+      - currency
+      properties:
+        amountPaisa:
+          type: string
+          description: Integer minor units (paisa). 150000 = 1,500.00 BDT.
+          pattern: ^[1-9][0-9]*$
+          example: '150000'
+        currency:
+          type: string
+          enum:
+          - BDT
+          default: BDT
+        provider:
+          type: string
+          enum:
+          - BKASH
+          - NAGAD
+          - ROCKET
+          - UPAY
+          - SSLCOMMERZ
+          - SHURJOPAY
+          - AAMARPAY
+          - MOCK
+          default: BKASH
+        customer:
+          $ref: '#/components/schemas/CustomerInfo'
+        description:
+          type: string
+          maxLength: 255
+          example: 'Invoice #1042 Payment'
+        redirectUrl:
+          type: string
+          format: uri
+          example: https://merchant.example.com/checkout/return
+        metadata:
+          type: object
+          additionalProperties: true
+    PaymentResponse:
+      type: object
+      required:
+      - id
+      - merchantId
+      - amountPaisa
+      - feePaisa
+      - refundedAmountPaisa
+      - currency
+      - status
+      - createdAt
+      properties:
+        id:
+          type: string
+          example: pay_a1b2c3d4e5f6
+        merchantId:
+          type: string
+          example: mch_test123
+        amountPaisa:
+          type: string
+          example: '150000'
+        feePaisa:
+          type: string
+          example: '2250'
+        refundedAmountPaisa:
+          type: string
+          example: '0'
+        currency:
+          type: string
+          example: BDT
+        status:
+          $ref: '#/components/schemas/PaymentStatus'
+        provider:
+          type: string
+          example: BKASH
+        redirectUrl:
+          type: string
+          example: https://checkout.denaneya.com/pay/pay_a1b2c3d4e5f6
+        riskScore:
+          type: integer
+          example: 12
+        idempotencyKey:
+          type: string
+          example: idem_abc123
+        createdAt:
+          type: string
+          format: date-time
+    PaymentListItem:
+      type: object
+      required:
+      - id
+      - merchantId
+      - amountPaisa
+      - currency
+      - status
+      - createdAt
+      properties:
+        id:
+          type: string
+        merchantId:
+          type: string
+        amountPaisa:
+          type: string
+        feePaisa:
+          type: string
+        refundedAmountPaisa:
+          type: string
+        currency:
+          type: string
+        status:
+          $ref: '#/components/schemas/PaymentStatus'
+        provider:
+          type: string
+        providerTrxId:
+          type: string
+        customerName:
+          type: string
+        customerEmail:
+          type: string
+        customerPhone:
+          type: string
+        riskScore:
+          type: integer
+        settledAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+    PaymentDetailResponse:
+      allOf:
+      - $ref: '#/components/schemas/PaymentResponse'
+      - type: object
+        properties:
+          netPaisa:
+            type: string
+            example: '147750'
+          providerTrxId:
+            type: string
+            example: 9K76TRX01
+          refunds:
+            type: array
+            items:
+              $ref: '#/components/schemas/RefundResponse'
+          timeline:
+            type: array
+            items:
+              type: object
+              properties:
+                status:
+                  type: string
+                timestamp:
+                  type: string
+                  format: date-time
+                note:
+                  type: string
+    CreateRefundRequest:
+      type: object
+      required:
+      - amountPaisa
+      - reason
+      properties:
+        amountPaisa:
+          type: string
+          pattern: ^[1-9][0-9]*$
+          example: '50000'
+        reason:
+          type: string
+          example: Customer requested order cancellation
+        metadata:
+          type: object
+          additionalProperties: true
+    RefundResponse:
+      type: object
+      required:
+      - id
+      - paymentId
+      - amountPaisa
+      - currency
+      - status
+      - createdAt
+      properties:
+        id:
+          type: string
+          example: ref_12345
+        paymentId:
+          type: string
+          example: pay_a1b2c3d4e5f6
+        amountPaisa:
+          type: string
+          example: '50000'
+        currency:
+          type: string
+          example: BDT
+        status:
+          type: string
+          enum:
+          - PENDING
+          - COMPLETED
+          - FAILED
+          example: COMPLETED
+        newPaymentStatus:
+          $ref: '#/components/schemas/PaymentStatus'
+        reason:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    CreatePaymentLinkRequest:
+      type: object
+      required:
+      - title
+      - amountPaisa
+      properties:
+        title:
+          type: string
+          example: Annual Subscription
+        description:
+          type: string
+        amountPaisa:
+          type: string
+          example: '1200000'
+        type:
+          type: string
+          enum:
+          - SINGLE_USE
+          - MULTI_USE
+          default: SINGLE_USE
+        maxUses:
+          type: integer
+          default: 1
+        allowedProviders:
+          type: array
+          items:
+            type: string
+        redirectUrl:
+          type: string
+          format: uri
+    PaymentLinkResponse:
+      type: object
+      required:
+      - id
+      - merchantId
+      - title
+      - slug
+      - amountPaisa
+      - status
+      - url
+      - createdAt
+      properties:
+        id:
+          type: string
+        merchantId:
+          type: string
+        title:
+          type: string
+        slug:
+          type: string
+        amountPaisa:
+          type: string
+        currency:
+          type: string
+          example: BDT
+        status:
+          type: string
+          enum:
+          - ACTIVE
+          - INACTIVE
+          - EXPIRED
+        url:
+          type: string
+          example: https://checkout.denaneya.com/l/plk_abc123
+        usedCount:
+          type: integer
+        maxUses:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+    InvoiceItem:
+      type: object
+      required:
+      - description
+      - quantity
+      - unitPricePaisa
+      - totalPaisa
+      properties:
+        description:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+        unitPricePaisa:
+          type: string
+        taxRateBps:
+          type: integer
+          default: 0
+        totalPaisa:
+          type: string
+    CreateInvoiceRequest:
+      type: object
+      required:
+      - invoiceNumber
+      - customer
+      - items
+      - dueDate
+      properties:
+        invoiceNumber:
+          type: string
+          example: INV-2026-0042
+        customer:
+          $ref: '#/components/schemas/CustomerInfo'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InvoiceItem'
+        taxPaisa:
+          type: string
+          default: '0'
+        discountPaisa:
+          type: string
+          default: '0'
+        dueDate:
+          type: string
+          format: date-time
+        notes:
+          type: string
+    InvoiceResponse:
+      type: object
+      required:
+      - id
+      - merchantId
+      - invoiceNumber
+      - totalAmountPaisa
+      - status
+      - createdAt
+      properties:
+        id:
+          type: string
+        merchantId:
+          type: string
+        invoiceNumber:
+          type: string
+        customerName:
+          type: string
+        totalAmountPaisa:
+          type: string
+        currency:
+          type: string
+          example: BDT
+        status:
+          type: string
+          enum:
+          - DRAFT
+          - SENT
+          - PAID
+          - VOID
+          - OVERDUE
+        dueDate:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+    InvoiceDetailResponse:
+      allOf:
+      - $ref: '#/components/schemas/InvoiceResponse'
+      - type: object
+        properties:
+          subtotalPaisa:
+            type: string
+          taxPaisa:
+            type: string
+          discountPaisa:
+            type: string
+          items:
+            type: array
+            items:
+              $ref: '#/components/schemas/InvoiceItem'
+          paymentId:
+            type: string
+    UpdateInvoiceRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+          - DRAFT
+          - SENT
+          - VOID
+        dueDate:
+          type: string
+          format: date-time
+        notes:
+          type: string
+    CreateWebhookRequest:
+      type: object
+      required:
+      - url
+      - events
+      properties:
+        url:
+          type: string
+          format: uri
+          example: https://merchant.example.com/api/webhooks/denaneya
+        events:
+          type: array
+          items:
+            type: string
+          example:
+          - payment.completed
+          - payment.failed
+          - refund.created
+        description:
+          type: string
+    WebhookCreatedResponse:
+      type: object
+      required:
+      - id
+      - merchantId
+      - url
+      - events
+      - secret
+      - status
+      - createdAt
+      properties:
+        id:
+          type: string
+        merchantId:
+          type: string
+        url:
+          type: string
+        events:
+          type: array
+          items:
+            type: string
+        secret:
+          type: string
+          description: HMAC-SHA256 signature secret. Disclosed ONLY ONCE upon creation.
+          example: whsec_9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d
+        status:
+          type: string
+          example: ACTIVE
+        createdAt:
+          type: string
+          format: date-time
+    WebhookSubscriptionResponse:
+      type: object
+      required:
+      - id
+      - merchantId
+      - url
+      - events
+      - status
+      - failureCount
+      - createdAt
+      properties:
+        id:
+          type: string
+        merchantId:
+          type: string
+        url:
+          type: string
+        events:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum:
+          - ACTIVE
+          - DISABLED
+          - FAILED
+        failureCount:
+          type: integer
+        lastDeliveryAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+    UpdateWebhookRequest:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum:
+          - ACTIVE
+          - DISABLED
+    DeviceResponse:
+      type: object
+      required:
+      - id
+      - deviceId
+      - model
+      - status
+      - lastHeartbeatAt
+      properties:
+        id:
+          type: string
+        deviceId:
+          type: string
+        model:
+          type: string
+        osVersion:
+          type: string
+        appVersion:
+          type: string
+        batteryLevel:
+          type: integer
+        isCharging:
+          type: boolean
+        networkType:
+          type: string
+        status:
+          type: string
+          enum:
+          - ACTIVE
+          - INACTIVE
+          - REVOKED
+        lastHeartbeatAt:
+          type: string
+          format: date-time
+    DevicePairRequest:
+      type: object
+      required:
+      - deviceId
+      - pairingToken
+      - publicKeyHex
+      - model
+      - osVersion
+      - appVersion
+      properties:
+        deviceId:
+          type: string
+          example: dev_4b8f9e01
+        pairingToken:
+          type: string
+          example: pair_99f8d1c7a2b3c4d5
+        publicKeyHex:
+          type: string
+          example: 3059301306072a8648ce3d020106082a8648ce3d03010703420004...
+        model:
+          type: string
+          example: Samsung Galaxy A14
+        osVersion:
+          type: string
+          example: Android 14 (API 34)
+        appVersion:
+          type: string
+          example: 1.0.0
+        simSlots:
+          type: array
+          items:
+            type: object
+            properties:
+              slot:
+                type: integer
+              carrier:
+                type: string
+              msisdn:
+                type: string
+    IngestSmsRequest:
+      type: object
+      required:
+      - deviceId
+      - sequenceNumber
+      - nonce
+      - timestamp
+      - eventType
+      - payload
+      - signature
+      properties:
+        deviceId:
+          type: string
+        sequenceNumber:
+          type: integer
+        nonce:
+          type: string
+          format: uuid
+        timestamp:
+          type: integer
+        eventType:
+          type: string
+          example: SMS_RECEIVED
+        payload:
+          type: object
+          required:
+          - sender
+          - messageText
+          - receivedAt
+          properties:
+            sender:
+              type: string
+              example: bKash
+            messageText:
+              type: string
+              example: You have received Tk 1,500.00 from 01712345678. Fee Tk 0.00.
+                Balance Tk 45,210.50. TrxID 9K76TRX01 at 14/09/2026 02:05
+            receivedAt:
+              type: integer
+            simSlot:
+              type: integer
+            batteryLevel:
+              type: integer
+        signature:
+          type: string
+          description: ECDSA P-256 Base64 signature
+    IngestSmsResponse:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - PROCESSED
+          - DUPLICATE_IGNORED
+        smsId:
+          type: string
+        provider:
+          type: string
+        trxId:
+          type: string
+        matchedPaymentId:
+          type: string
+        message:
+          type: string
+    HeartbeatRequest:
+      type: object
+      required:
+      - deviceId
+      - sequenceNumber
+      - batteryLevel
+      - networkType
+      properties:
+        deviceId:
+          type: string
+        sequenceNumber:
+          type: integer
+        batteryLevel:
+          type: integer
+        isCharging:
+          type: boolean
+        networkType:
+          type: string
+    GatewayHealthResponse:
+      type: object
+      required:
+      - status
+      - timestamp
+      - gateways
+      properties:
+        status:
+          type: string
+          enum:
+          - UP
+          - DEGRADED
+          - DOWN
+        timestamp:
+          type: string
+          format: date-time
+        gateways:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+                enum:
+                - UP
+                - DEGRADED
+                - DOWN
+              latencyMs:
+                type: integer
+    RunReconciliationRequest:
+      type: object
+      properties:
+        batchId:
+          type: string
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
+        provider:
+          type: string
+          enum:
+          - BKASH
+          - NAGAD
+          - ROCKET
+          - UPAY
+          - SSLCOMMERZ
+          - SHURJOPAY
+          - AAMARPAY
+        merchantId:
+          type: string
+        autoHeal:
+          type: boolean
+          default: false
+        content:
+          type: string
+          description: Raw or base64 statement content for direct batch parsing
+        batchReference:
+          type: string
+        feeTolerancePaisa:
+          type: string
+          pattern: ^[0-9]+$
+        expectedMdrBps:
+          type: integer
+    ReconciliationJobResponse:
+      type: object
+      required:
+      - runId
+      - status
+      - metrics
+      - discrepancies
+      properties:
+        runId:
+          type: string
+          example: rec_run_01j7v04x
+        batchId:
+          type: string
+          example: batch_ssl_20260914
+        status:
+          type: string
+          enum:
+          - MATCHED
+          - DISCREPANCIES_DETECTED
+          - FAILED
+        startDate:
+          type: string
+          format: date-time
+        endDate:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        metrics:
+          type: object
+          required:
+          - totalRecordsEvaluated
+          - matchedCount
+          - discrepancyCount
+          - autoHealedCount
+          - totalInternalAmountBDT
+          - totalProviderAmountBDT
+          - totalLedgerAmountBDT
+          - netDiscrepancyAmountBDT
+          - breakdown
+          properties:
+            totalRecordsEvaluated:
+              type: integer
+            matchedCount:
+              type: integer
+            discrepancyCount:
+              type: integer
+            autoHealedCount:
+              type: integer
+            totalInternalAmountBDT:
+              type: string
+              example: '1500.00'
+            totalProviderAmountBDT:
+              type: string
+              example: '1500.00'
+            totalLedgerAmountBDT:
+              type: string
+              example: '1500.00'
+            netDiscrepancyAmountBDT:
+              type: string
+              example: '0.00'
+            breakdown:
+              type: object
+              additionalProperties:
+                type: integer
+        discrepancies:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReconciliationDiscrepancyDetail'
+    ReconciliationDiscrepancyDetail:
+      type: object
+      required:
+      - id
+      - type
+      - provider
+      - discrepancyAmountBDT
+      - resolutionStatus
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum:
+          - MATCHED
+          - AMOUNT_MISMATCH
+          - STATUS_MISMATCH
+          - MISSING_IN_LEDGER
+          - MISSING_IN_GATEWAY
+          - UNEXPECTED_GATEWAY_TX
+          - FEE_DISCREPANCY
+        paymentId:
+          type: string
+        providerTrxId:
+          type: string
+        provider:
+          type: string
+        merchantId:
+          type: string
+        internalAmountBDT:
+          type: string
+        providerAmountBDT:
+          type: string
+        ledgerAmountBDT:
+          type: string
+        discrepancyAmountBDT:
+          type: string
+        internalStatus:
+          type: string
+        providerStatus:
+          type: string
+        resolutionStatus:
+          type: string
+          enum:
+          - UNRESOLVED
+          - AUTO_RESOLVED
+          - MANUALLY_RESOLVED
+          - DISMISSED
+        notes:
+          type: string

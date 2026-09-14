@@ -1,0 +1,50 @@
+sequenceDiagram
+    autonumber
+    participant AppTx as Payment Processing Transaction
+    participant DB as Neon PostgreSQL (outbox_events)
+    participant QStash as Upstash QStash (HTTP Queue)
+    participant WebhookWorker as Webhook Delivery Worker
+    participant SSRFGuard as SSRF Protection Guard
+    participant SecurityPkg as Security Envelope (AES-256-GCM)
+    participant MerchantEndpoint as Merchant Webhook Server
+    participant DLQ as Dead Letter Queue (DLQ)
+
+    AppTx->>DB: INSERT INTO outbox_events (eventType, payload, status: 'PENDING')
+    AppTx-->>QStash: Publish webhook job trigger (scheduledAt: NOW)
+
+    loop Webhook Dispatch Pipeline
+        QStash->>WebhookWorker: Trigger delivery task (eventId)
+        WebhookWorker->>DB: SELECT * FROM outbox_events WHERE id=eventId
+        WebhookWorker->>DB: SELECT * FROM webhook_subscriptions WHERE merchantId=mchId AND status='ACTIVE'
+        
+        WebhookWorker->>SSRFGuard: validateUrlForSsrf(subscription.url)
+        alt SSRF Guard Fails (Private IP / Localhost / Cloud Metadata)
+            SSRFGuard-->>WebhookWorker: INVALID (Blocked IP: 169.254.169.254)
+            WebhookWorker->>DB: UPDATE webhook_subscriptions SET status='FAILED'
+            WebhookWorker->>DB: INSERT INTO webhook_deliveries (status: 'DEAD_LETTER', error: 'SSRF_BLOCKED')
+        else SSRF Guard Passes
+            SSRFGuard-->>WebhookWorker: SAFE
+            WebhookWorker->>SecurityPkg: decrypt(subscription.secret)
+            SecurityPkg-->>WebhookWorker: rawWebhookSecret
+            WebhookWorker->>WebhookWorker: Compute HMAC-SHA256 signature (DenaNeya-Signature)
+            
+            WebhookWorker->>MerchantEndpoint: POST subscription.url (Headers: DenaNeya-Signature, X-Request-Id)
+            
+            alt Merchant Responds 2xx OK
+                MerchantEndpoint-->>WebhookWorker: 200 OK
+                WebhookWorker->>DB: UPDATE outbox_events SET status='DELIVERED', processedAt=NOW()
+                WebhookWorker->>DB: INSERT INTO webhook_deliveries (status: 'SUCCESS', responseStatus: 200)
+            else Merchant Responds 5xx / 429 / Timeout
+                MerchantEndpoint-->>WebhookWorker: 503 Service Unavailable
+                WebhookWorker->>WebhookWorker: Increment retryCount (attempt = attempt + 1)
+                alt retryCount < 5 (Exponential Backoff: 30s, 2m, 15m, 1h, 6h)
+                    WebhookWorker->>DB: INSERT INTO webhook_deliveries (status: 'RETRYING', nextRetryAt)
+                    WebhookWorker->>QStash: Schedule delayed retry message (delayMs)
+                else retryCount >= 5 (Max Retries Reached)
+                    WebhookWorker->>DB: UPDATE outbox_events SET status='FAILED'
+                    WebhookWorker->>DB: INSERT INTO webhook_deliveries (status: 'DEAD_LETTER')
+                    WebhookWorker->>DLQ: Route to DLQ & trigger merchant dashboard alert
+                end
+            end
+        end
+    end

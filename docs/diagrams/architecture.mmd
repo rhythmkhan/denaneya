@@ -1,0 +1,44 @@
+C4Container
+    title Container Diagram for DenaNeya Payment Orchestration Platform
+
+    Person(customer, "Customer / Payer", "Purchases goods/services via hosted checkout or direct MFS transfer.")
+    Person(merchant, "Merchant Operator", "Manages payments, links, invoices, API keys, and devices via Dashboard.")
+    Person(admin, "Platform Admin / Risk Officer", "Monitors gateway health, reviews dual-control cases, and triggers reconciliation.")
+
+    System_Boundary(c1, "DenaNeya Monorepo Platform") {
+        Container(webApp, "Next.js Web Application", "Next.js 15 App Router, TypeScript, Tailwind", "Serves Marketing, Merchant/Admin Dashboard, Hosted Checkout, Docs Portal, and REST API v1.")
+        
+        Container(pkgSecurity, "packages/security", "AES-256-GCM, Argon2id", "Envelope encryption for credentials/secrets, SSRF DNS guard, RBAC, and rate limiting.")
+        Container(pkgPaymentCore, "packages/payment-core", "TypeScript Strict", "Paisa minor-unit math (zero float), 11-state state machine, and Zod schemas.")
+        Container(pkgLedger, "packages/ledger", "Double-Entry Accounting", "5-tier Chart of Accounts, atomic journal settlement, debit=credit invariant.")
+        Container(pkgFraud, "packages/fraud-engine", "Rule Engine", "12 weighted risk rules (0-100), automated thresholds, Maker-Checker queue.")
+        Container(pkgAdapters, "packages/gateway-adapters", "Adapter Pattern", "Unified GatewayAdapter interface for SSLCOMMERZ, bKash, Nagad, shurjoPay, aamarPay.")
+        Container(pkgSmsParser, "packages/sms-parser", "Regex Engine", "Versioned parsers for bKash, Nagad, Rocket, Upay, SHA-256 hash deduplication, balance chain.")
+        Container(pkgWebhooks, "packages/webhooks", "Transactional Outbox", "HMAC-SHA256 event signing, 5x exponential retry, Dead Letter Queue.")
+
+        ContainerDb(dbPostgres, "Neon Serverless PostgreSQL", "PostgreSQL 16, Drizzle ORM", "21 relational tables with unique constraints, idempotency keys, hash chaining, and trigger guards.")
+    }
+
+    Container(androidApp, "Android SMS Collector", "Native Kotlin, Jetpack Compose, Room DB, WorkManager", "Captures MFS SMS, hardware-signs with Keystore EC P-256, offline queue sync.")
+    Container_Ext(qstash, "Upstash QStash", "Serverless HTTP Message Queue", "Drives asynchronous webhook retries, scheduled reconciliation crons, and background workers.")
+    Container_Ext(gateways, "Upstream Gateways & MFS", "SSLCOMMERZ, bKash, Nagad, etc.", "Executes external payment capture, verification, and refunds.")
+    Container_Ext(merchantServer, "Merchant Backend", "HTTPS Webhook Listener & REST Client", "Receives signed payment notifications and creates orders via API.")
+
+    Rel(customer, webApp, "Visits checkout, selects payment method", "HTTPS")
+    Rel(merchant, webApp, "Manages account, generates API keys", "HTTPS")
+    Rel(admin, webApp, "Performs Maker-Checker approvals & audits", "HTTPS")
+
+    Rel(webApp, dbPostgres, "Executes transactional queries", "Postgres Wire / SSL")
+    Rel(webApp, pkgPaymentCore, "Validates transitions & amounts", "In-Process")
+    Rel(webApp, pkgLedger, "Posts journal transactions", "In-Process")
+    Rel(webApp, pkgFraud, "Evaluates payment risk scores", "In-Process")
+    Rel(webApp, pkgAdapters, "Initiates provider sessions", "HTTPS")
+    Rel(pkgAdapters, gateways, "Dispatches payment API requests", "HTTPS / JSON / XML")
+
+    Rel(androidApp, webApp, "Submits signed SMS and heartbeats", "HTTPS / POST /api/v1/devices/*")
+    Rel(webApp, pkgSmsParser, "Parses SMS and verifies balance", "In-Process")
+
+    Rel(webApp, qstash, "Schedules background tasks and retries", "HTTPS / REST")
+    Rel(qstash, webApp, "Invokes webhook dispatch worker", "HTTPS / POST")
+    Rel(webApp, merchantServer, "Delivers signed HMAC-SHA256 webhooks", "HTTPS / POST")
+    Rel(merchantServer, webApp, "Invokes REST API with API keys", "HTTPS / Bearer Auth")

@@ -1,0 +1,46 @@
+sequenceDiagram
+    autonumber
+    actor Customer as Customer / Payer
+    participant WebAPI as DenaNeya Payment API
+    participant FraudEngine as Anti-Fraud Engine (12 Rules)
+    participant DB as Neon PostgreSQL
+    actor Maker as Maker (Risk Analyst)
+    actor Checker as Checker (Finance Director)
+    participant Ledger as Double-Entry Ledger Engine
+
+    Customer->>WebAPI: Submits high-value or unusual transaction
+    WebAPI->>FraudEngine: evaluate(payment)
+    FraudEngine->>FraudEngine: Evaluate rules (Velocity, Device Trust, High Value, Balance Anomaly)
+    FraudEngine-->>WebAPI: RiskScore: 82, Action: UNDER_REVIEW
+
+    rect rgb(255, 250, 240)
+        note over WebAPI,DB: Enqueue Maker-Checker Case
+        WebAPI->>DB: INSERT INTO payments (status: 'UNDER_REVIEW', riskScore: 82)
+        WebAPI->>DB: INSERT INTO fraud_evaluations (paymentId, riskScore: 82, triggeredRules)
+        WebAPI->>DB: INSERT INTO review_cases (paymentId, status: 'OPEN', reason: 'Risk score > 80')
+    end
+
+    WebAPI-->>Customer: 201 Created (status: 'UNDER_REVIEW', message: 'Transaction under compliance review')
+
+    Maker->>DB: Queries Admin Dashboard: GET /api/v1/review-cases?status=OPEN
+    DB-->>Maker: Displays review case details, fraud flags, device telemetry
+    Maker->>DB: Submits recommendation: makerRecommendation: 'APPROVE', makerNotes: 'Customer KYC verified'
+    DB->>DB: UPDATE review_cases SET status='MAKER_RECOMMENDED', makerId=usr_maker1, makerDecidedAt=NOW()
+
+    Checker->>DB: Queries Maker-Checker Queue: GET /api/v1/review-cases?status=MAKER_RECOMMENDED
+    DB-->>Checker: Displays case with Maker recommendation and evidence
+    
+    alt Checker Attempts Self-Approval (Maker == Checker)
+        Checker->>DB: Submits approval with same userId
+        DB-->>Checker: REJECTED by Check Constraint: 'chk_maker_checker_distinct' (Separation of Duties)!
+    else Valid Distinct Checker Approval
+        Checker->>DB: Submits decision: checkerDecision: 'APPROVE', checkerNotes: 'Approved per policy'
+        
+        rect rgb(240, 255, 240)
+            note over DB,Ledger: Atomic State Transition & Settlement
+            DB->>DB: UPDATE review_cases SET status='CHECKER_APPROVED', checkerId=usr_checker2, checkerDecidedAt=NOW()
+            DB->>DB: UPDATE payments SET status='COMPLETED', settledAt=NOW()
+            DB->>Ledger: postTransaction(PAYMENT_CAPTURE, entries=[DEBIT Clearing, CREDIT Payable])
+            DB->>DB: INSERT INTO outbox_events (eventType: 'payment.completed')
+        end
+    end
