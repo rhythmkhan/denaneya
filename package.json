@@ -1,0 +1,32 @@
+{
+  "name": "denaneya",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DenaNeya — Production-grade multi-tenant payment management and orchestration platform for Bangladesh",
+  "packageManager": "pnpm@11.17.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:coverage": "turbo run test:coverage",
+    "test:e2e": "tsx tests/e2e/runner/run-e2e.ts",
+    "db:migrate": "pnpm --filter @denaneya/database db:migrate",
+    "db:seed": "pnpm --filter @denaneya/database db:seed",
+    "clean": "turbo run clean && rimraf node_modules .turbo"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.3",
+    "turbo": "^2.10.12",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.7",
+    "@vitest/coverage-v8": "^3.0.7"
+  }
+}
