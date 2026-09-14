@@ -1,0 +1,38 @@
+{
+  "name": "@denaneya/webhooks",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Transactional outbox pipeline, SSRF-safe webhook dispatcher, HMAC-SHA256 signing, and retry/DLQ manager for DenaNeya",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist coverage",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@denaneya/database": "workspace:*",
+    "@denaneya/observability": "workspace:*",
+    "@denaneya/payment-core": "workspace:*",
+    "@denaneya/security": "workspace:*",
+    "drizzle-orm": "^0.39.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "@vitest/coverage-v8": "^3.0.7",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.7"
+  }
+}

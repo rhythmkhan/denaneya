@@ -1,0 +1,41 @@
+{
+  "name": "@denaneya/reconciliation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Three-Way Financial Reconciliation Engine for DenaNeya (Payments vs Gateway Statements vs Ledger)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./parsers": {
+      "types": "./dist/parsers/index.d.ts",
+      "import": "./dist/parsers/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist coverage",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@denaneya/database": "workspace:*",
+    "@denaneya/ledger": "workspace:*",
+    "@denaneya/payment-core": "workspace:*",
+    "drizzle-orm": "^0.39.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.7",
+    "@vitest/coverage-v8": "^3.0.7"
+  }
+}
