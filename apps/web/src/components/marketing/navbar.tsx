@@ -51,7 +51,7 @@ export function Navbar() {
               Security
             </Link>
             <a
-              href="https://github.com/rhythmkhan/denaneya/releases/download/v1.0.0/denaneya-collector-v1.0.0.apk"
+              href="https://github.com/rhythmkhan/denaneya/releases/download/v1.0.1/denaneya-collector-v1.0.1.apk"
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs font-semibold px-2.5 py-1 rounded-full border border-emerald-600/30 bg-emerald-50/60 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 transition flex items-center gap-1"
@@ -108,13 +108,13 @@ export function Navbar() {
               Security Architecture
             </Link>
             <a
-              href="https://github.com/rhythmkhan/denaneya/releases/download/v1.0.0/denaneya-collector-v1.0.0.apk"
+              href="https://github.com/rhythmkhan/denaneya/releases/download/v1.0.1/denaneya-collector-v1.0.1.apk"
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => setMobileMenuOpen(false)}
               className="px-2 py-1.5 font-semibold text-emerald-600 flex items-center gap-2"
             >
-              <Smartphone className="w-4 h-4" /> Download Android APK (v1.0.0)
+              <Smartphone className="w-4 h-4" /> Download Android APK (v1.0.1)
             </a>
           </nav>
           <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex flex-col gap-2">

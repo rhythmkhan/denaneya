@@ -174,64 +174,61 @@ fun QrScannerTab(
     isProcessing: Boolean
 ) {
     var rawQrInput by remember { mutableStateOf("") }
+    var showManualFallback by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
+        // Real Live Camera Preview with ZXing Barcode Scanning
+        CameraQrScanner(
             modifier = Modifier
-                .size(260.dp)
-                .background(Color(0xFF0F172A), shape = RoundedCornerShape(16.dp))
-                .border(2.dp, EmeraldPrimaryLight, shape = RoundedCornerShape(16.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(
-                    Icons.Default.QrCodeScanner,
-                    contentDescription = null,
-                    tint = EmeraldPrimaryLight,
-                    modifier = Modifier.size(72.dp)
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    "Point Camera at Dashboard QR",
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(
-                    "QR code expires in 10 minutes",
-                    color = Color(0xFF94A3B8),
-                    style = MaterialTheme.typography.labelSmall
-                )
-            }
-        }
+                .fillMaxWidth()
+                .height(340.dp),
+            onQrScanned = onQrScanned
+        )
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // Direct payload pasting for testing and environments without physical camera
-        OutlinedTextField(
-            value = rawQrInput,
-            onValueChange = { rawQrInput = it },
-            label = { Text("Or paste QR JSON payload here") },
-            placeholder = { Text("{\"serverUrl\":...,\"pairingToken\":...}") },
-            modifier = Modifier.fillMaxWidth(),
-            maxLines = 4
+        Text(
+            text = "Align the QR code from the DenaNeya Merchant Dashboard within the viewfinder frame.",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFF64748B),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 8.dp)
         )
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        Button(
-            onClick = { if (rawQrInput.isNotBlank()) onQrScanned(rawQrInput) },
-            enabled = rawQrInput.isNotBlank() && !isProcessing,
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimaryLight)
-        ) {
-            Text("Process QR Data")
+        TextButton(onClick = { showManualFallback = !showManualFallback }) {
+            Text(if (showManualFallback) "Hide Manual Payload Entry" else "Or paste QR payload manually")
+        }
+
+        if (showManualFallback) {
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = rawQrInput,
+                onValueChange = { rawQrInput = it },
+                label = { Text("Paste QR JSON payload") },
+                placeholder = { Text("{\"serverUrl\":...,\"pairingToken\":...}") },
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 4
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Button(
+                onClick = { if (rawQrInput.isNotBlank()) onQrScanned(rawQrInput) },
+                enabled = rawQrInput.isNotBlank() && !isProcessing,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimaryLight)
+            ) {
+                Text("Process Pasted QR Data")
+            }
         }
     }
 }
