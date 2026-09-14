@@ -3,15 +3,10 @@
   "framework": "nextjs",
   "buildCommand": "pnpm --filter @denaneya/web build",
   "installCommand": "pnpm install",
+  "outputDirectory": "apps/web/.next",
   "cleanUrls": true,
   "trailingSlash": false,
   "regions": ["sin1"],
-  "functions": {
-    "apps/web/src/app/api/**/*": {
-      "memory": 1024,
-      "maxDuration": 15
-    }
-  },
   "headers": [
     {
       "source": "/(.*)",

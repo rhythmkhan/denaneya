@@ -4,7 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import { Card, CardHeader, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { loginAction } from '@/lib/actions/auth.actions';
 import { LogIn, ShieldCheck, ArrowLeft } from 'lucide-react';
 
@@ -66,9 +66,9 @@ export default function LoginPage() {
 
         <Card className="border-slate-200 dark:border-slate-800 shadow-xl">
           <CardHeader className="space-y-1">
-            <CardTitle className="text-xl font-bold">
+            <h1 className="text-xl font-bold leading-none tracking-tight text-slate-900 dark:text-slate-100">
               {requiresMfa ? 'Two-Factor Authentication' : 'Sign in to your account'}
-            </CardTitle>
+            </h1>
             <CardDescription className="text-xs">
               {requiresMfa
                 ? 'Enter the 6-digit code from your authenticator app to complete sign-in.'

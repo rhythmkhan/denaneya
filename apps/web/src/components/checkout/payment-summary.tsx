@@ -1,5 +1,5 @@
 import { formatPaisaToBDT } from '@/lib/format';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ShieldCheck, Store } from 'lucide-react';
 
@@ -36,7 +36,7 @@ export function PaymentSummary({
             </div>
             <div>
               <span className="text-xs text-slate-500 uppercase font-semibold tracking-wider">Merchant</span>
-              <CardTitle className="text-lg">{merchantName || 'DenaNeya Merchant'}</CardTitle>
+              <h1 className="text-lg font-semibold leading-none tracking-tight text-slate-900 dark:text-slate-100">{merchantName || 'DenaNeya Merchant'}</h1>
             </div>
           </div>
           {isSandbox && (

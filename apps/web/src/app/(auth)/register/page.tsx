@@ -4,7 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import { Card, CardHeader, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { registerMerchantAction } from '@/lib/actions/auth.actions';
 import { UserPlus, ShieldCheck } from 'lucide-react';
 
@@ -49,7 +49,7 @@ export default function RegisterPage() {
 
         <Card className="border-slate-200 dark:border-slate-800 shadow-xl">
           <CardHeader className="space-y-1">
-            <CardTitle className="text-xl font-bold">Register Merchant Account</CardTitle>
+            <h1 className="text-xl font-bold leading-none tracking-tight text-slate-900 dark:text-slate-100">Register Merchant Account</h1>
             <CardDescription className="text-xs">
               Instant sandbox activation with test keys and simulator access.
             </CardDescription>
