@@ -3,8 +3,6 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   serverExternalPackages: [
     '@node-rs/argon2',
-    '@node-rs/argon2-win32-x64-msvc',
-    '@denaneya/security',
   ],
   reactStrictMode: true,
   transpilePackages: [
@@ -16,11 +14,12 @@ const nextConfig: NextConfig = {
     '@denaneya/webhooks',
     '@denaneya/sms-parser',
     '@denaneya/fraud-engine',
+    '@denaneya/security',
   ],
   webpack: (config, { isServer }) => {
     if (isServer) {
       config.externals = config.externals || [];
-      config.externals.push('@node-rs/argon2', '@node-rs/argon2-win32-x64-msvc');
+      config.externals.push('@node-rs/argon2');
     }
     return config;
   },

@@ -98,3 +98,5 @@ temp/
 test-reports/
 
 .vercel
+.env*
+!.env.example
