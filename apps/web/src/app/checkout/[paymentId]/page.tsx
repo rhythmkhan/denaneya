@@ -60,15 +60,36 @@ export default async function CheckoutPage({
 
   // Fallback demo payment for previewing or testing
   if (!paymentRecord) {
-    if (paymentId === 'pay_demo' || paymentId.startsWith('pay_test')) {
+    if (paymentId === 'pay_demo' || paymentId.startsWith('pay_test') || paymentId.startsWith('pay_')) {
       paymentRecord = {
         id: paymentId,
-        amountPaisa: 150000n, // ৳ 1,500.00
+        merchantId: 'mch_sandbox_demo',
+        amountPaisa: 350000n, // ৳ 3,500.00
         currency: 'BDT',
-        status: 'REQUIRES_ACTION',
-        description: 'Demo E-commerce Checkout Order #84920',
-        customerName: 'Tanvir Rahman',
+        status: 'PENDING',
+        description: 'DenaNeya Hosted Checkout Order',
+        customerName: 'Demo Customer',
+        customerEmail: 'customer@example.com',
       };
+      if (db) {
+        try {
+          await db.insert(payments).values({
+            id: paymentId,
+            merchantId: 'mch_sandbox_demo',
+            amountPaisa: 350000n,
+            feePaisa: 5250n,
+            currency: 'BDT',
+            status: 'PENDING',
+            description: 'DenaNeya Hosted Checkout Order',
+            customerName: 'Demo Customer',
+            customerEmail: 'customer@example.com',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        } catch {
+          // ignore duplicate
+        }
+      }
       isSandbox = true;
     } else {
       notFound();

@@ -54,6 +54,10 @@ export default async function CheckoutStatusPage({
     }
   }
 
+  if (merchantReturnUrl === '/' && (paymentId.startsWith('pay_') || paymentId === 'pay_demo')) {
+    merchantReturnUrl = `/demo-store/success?payment_id=${paymentId}&status=${status}${trxId ? `&trx_id=${trxId}` : ''}`;
+  }
+
   const isSuccess = status === 'COMPLETED';
   const isFailed = status === 'FAILED' || status === 'CANCELLED';
 

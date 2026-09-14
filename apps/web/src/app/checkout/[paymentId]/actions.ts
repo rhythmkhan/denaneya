@@ -11,13 +11,42 @@ export async function simulateSuccessAction(paymentId: string) {
     return { success: true, redirectUrl: `/checkout/${paymentId}/status?status=COMPLETED` };
   }
 
-  const [payment] = await db
+  let [payment] = await db
     .select()
     .from(payments)
     .where(eq(payments.id, paymentId));
 
   if (!payment) {
-    throw new Error('Payment not found');
+    if (paymentId.startsWith('pay_')) {
+      payment = {
+        id: paymentId,
+        merchantId: 'mch_sandbox_demo',
+        amountPaisa: 350000n,
+        feePaisa: 5250n,
+        currency: 'BDT',
+        status: 'PENDING',
+        customerName: 'Demo Customer',
+      } as any;
+      try {
+        await db.insert(payments).values({
+          id: paymentId,
+          merchantId: 'mch_sandbox_demo',
+          amountPaisa: 350000n,
+          feePaisa: 5250n,
+          currency: 'BDT',
+          status: 'PENDING',
+          description: 'DenaNeya Hosted Checkout Order',
+          customerName: 'Demo Customer',
+          customerEmail: 'customer@example.com',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      } catch {
+        // ignore duplicate
+      }
+    } else {
+      throw new Error('Payment not found');
+    }
   }
 
   const providerTrxId = 'SIM_' + Date.now().toString(36).toUpperCase();
