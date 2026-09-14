@@ -1,0 +1,47 @@
+export const TEST_CONSTANTS = {
+  MERCHANT_A: {
+    ID: 'mch_01h8a9bcdef0123456789a',
+    NAME: 'Test Merchant Alpha',
+    BUSINESS_NAME: 'Alpha Digital Ltd',
+    EMAIL: 'merchant.alpha@example.com',
+    FEE_RATE_BPS: 150,
+    FIXED_FEE_PAISA: 500n,
+    DEFAULT_CURRENCY: 'BDT' as const,
+    WEBHOOK_SECRET: 'whsec_alpha_test_secret_1234567890abcdef',
+  },
+  MERCHANT_B: {
+    ID: 'mch_01h8b9cdef0123456789b',
+    NAME: 'Test Merchant Beta',
+    BUSINESS_NAME: 'Beta Enterprise Ltd',
+    EMAIL: 'merchant.beta@example.com',
+    FEE_RATE_BPS: 120,
+    FIXED_FEE_PAISA: 0n,
+    DEFAULT_CURRENCY: 'BDT' as const,
+    WEBHOOK_SECRET: 'whsec_beta_test_secret_1234567890abcdef',
+  },
+  USERS: {
+    ADMIN_ID: 'usr_admin_01h8admin0123456789',
+    OWNER_ID: 'usr_owner_01h8owner0123456789',
+    MAKER_ID: 'usr_maker_01h8maker0123456789',
+    CHECKER_ID: 'usr_checker_01h8checker012345678',
+  },
+  DEVICES: {
+    COLLECTOR_01_ID: 'dev_collector_01h8device012345',
+    COLLECTOR_02_ID: 'dev_collector_01h8device067890',
+  },
+  TIMEOUTS: {
+    DEFAULT_TEST_MS: 30000,
+    HOOK_TIMEOUT_MS: 30000,
+    POLL_TIMEOUT_MS: 5000,
+    POLL_INTERVAL_MS: 100,
+    NETWORK_TIMEOUT_MS: 10000,
+  },
+  MONEY: {
+    ONE_PAISA: 1n,
+    ONE_BDT_PAISA: 100n,
+    HUNDRED_BDT_PAISA: 10000n,
+    THOUSAND_BDT_PAISA: 100000n,
+    DEFAULT_CURRENCY: 'BDT' as const,
+  },
+  PAISA_FACTOR: 100n,
+} as const;
