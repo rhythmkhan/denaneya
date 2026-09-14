@@ -5,6 +5,7 @@ import {
   getDb,
   db,
   checkDatabaseHealth,
+  ensureBootstrapData,
   type DbClient,
   type DatabaseHealthResult,
 } from '@denaneya/database';
@@ -16,6 +17,7 @@ export {
   getDb,
   db,
   checkDatabaseHealth,
+  ensureBootstrapData,
   type DbClient,
   type DatabaseHealthResult,
 };

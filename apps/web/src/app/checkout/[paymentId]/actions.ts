@@ -30,7 +30,19 @@ export async function simulateSuccessAction(paymentId: string) {
     feePaisa: payment.feePaisa,
   });
 
-  revalidatePath(`/checkout/${paymentId}`);
+  // Automatically dispatch queued outbox webhooks to merchant webhook endpoints
+  try {
+    const { processOutboxEvents } = await import('@denaneya/webhooks');
+    await processOutboxEvents(db);
+  } catch (err) {
+    console.warn('[WEBHOOKS] Non-fatal outbox dispatch error in checkout simulation:', err);
+  }
+
+  try {
+    revalidatePath(`/checkout/${paymentId}`);
+  } catch {
+    // Non-fatal when executed outside Next.js request context (e.g. tests)
+  }
   return { success: true, redirectUrl: `/checkout/${paymentId}/status?status=COMPLETED&trxId=${providerTrxId}` };
 }
 
@@ -45,7 +57,11 @@ export async function simulateFailureAction(paymentId: string) {
       .where(eq(payments.id, paymentId));
   }
 
-  revalidatePath(`/checkout/${paymentId}`);
+  try {
+    revalidatePath(`/checkout/${paymentId}`);
+  } catch {
+    // Non-fatal when executed outside Next.js request context (e.g. tests)
+  }
   return { success: true, redirectUrl: `/checkout/${paymentId}/status?status=FAILED` };
 }
 

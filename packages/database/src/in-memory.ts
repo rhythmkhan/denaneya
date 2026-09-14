@@ -3,6 +3,7 @@
  * Provides zero-crash cold-start fallback when DATABASE_URL is unset or invalid.
  */
 
+import * as crypto from 'node:crypto';
 import { drizzle } from 'drizzle-orm/neon-serverless';
 import * as schema from './schema/index.js';
 
@@ -11,11 +12,123 @@ const globalStore = new Map<string, any[]>();
 const transactionStack: Map<string, any[]>[] = [];
 
 /**
+ * Ensures baseline bootstrap data exists (Sandbox Merchant, API key, Chart of Accounts).
+ */
+export function ensureBootstrapData(): void {
+  if (!globalStore.has('merchants') || globalStore.get('merchants')!.length === 0) {
+    const now = new Date();
+    const demoApiKey = 'dn_test_sec_9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d';
+    const keyHash = crypto.createHash('sha256').update(demoApiKey).digest('hex');
+
+    // 1. Default Sandbox Merchant
+    const merchantsList = [
+      {
+        id: 'mch_sandbox_demo',
+        name: 'DenaNeya Demo Store',
+        businessName: 'DenaNeya Technologies Ltd.',
+        businessType: 'PRIVATE_LIMITED',
+        email: 'sandbox@denaneya.com',
+        phone: '+8801700000000',
+        kycStatus: 'VERIFIED',
+        status: 'ACTIVE',
+        environment: 'SANDBOX',
+        feeRateBps: 150,
+        fixedFeePaisa: 0n,
+        defaultCurrency: 'BDT',
+        webhookSecret: 'whsec_demo_store_webhook_secret_key_2026',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+    globalStore.set('merchants', merchantsList);
+
+    // 2. Default Sandbox API Key
+    const apiKeysList = [
+      {
+        id: 'key_demo_sandbox_01',
+        merchantId: 'mch_sandbox_demo',
+        name: 'Default Sandbox Secret',
+        keyPrefix: 'dn_test_sec_9a8b',
+        keyHash,
+        type: 'SECRET',
+        environment: 'SANDBOX',
+        scopes: [
+          'payments:read',
+          'payments:write',
+          'invoices:read',
+          'invoices:write',
+          'payment_links:read',
+          'payment_links:write',
+          'webhooks:read',
+          'webhooks:write',
+          'refunds:create',
+          'reconciliation:write',
+          'devices:read',
+          '*',
+        ],
+        lastUsedAt: now,
+        expiresAt: null,
+        revokedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+    globalStore.set('api_keys', apiKeysList);
+
+    // 3. Platform Chart of Accounts
+    const standardAccounts = [
+      { id: 'acc_1110', code: '1110', name: 'SSLCOMMERZ In-Transit Receivable', type: 'ASSET', normalBalance: 'DEBIT', description: 'Clearing account for SSLCOMMERZ card & netbanking transactions' },
+      { id: 'acc_1120', code: '1120', name: 'shurjoPay In-Transit Receivable', type: 'ASSET', normalBalance: 'DEBIT', description: 'Clearing account for shurjoPay transactions' },
+      { id: 'acc_1130', code: '1130', name: 'aamarPay In-Transit Receivable', type: 'ASSET', normalBalance: 'DEBIT', description: 'Clearing account for aamarPay transactions' },
+      { id: 'acc_1140', code: '1140', name: 'bKash Direct Checkout Receivable', type: 'ASSET', normalBalance: 'DEBIT', description: 'bKash tokenized gateway checkout receivable' },
+      { id: 'acc_1150', code: '1150', name: 'Nagad PGW Receivable', type: 'ASSET', normalBalance: 'DEBIT', description: 'Nagad PGW gateway receivable' },
+      { id: 'acc_1210', code: '1210', name: 'bKash Merchant SIM Wallet', type: 'ASSET', normalBalance: 'DEBIT', description: 'Custodial balance in merchant bKash SIM' },
+      { id: 'acc_1220', code: '1220', name: 'Nagad Merchant SIM Wallet', type: 'ASSET', normalBalance: 'DEBIT', description: 'Custodial balance in merchant Nagad SIM' },
+      { id: 'acc_1230', code: '1230', name: 'Rocket Merchant SIM Wallet', type: 'ASSET', normalBalance: 'DEBIT', description: 'Custodial balance in merchant Rocket SIM' },
+      { id: 'acc_1240', code: '1240', name: 'Upay Merchant SIM Wallet', type: 'ASSET', normalBalance: 'DEBIT', description: 'Custodial balance in merchant Upay SIM' },
+      { id: 'acc_1310', code: '1310', name: 'Commercial Bank Settlement Treasury', type: 'ASSET', normalBalance: 'DEBIT', description: 'DenaNeya commercial bank clearing pool' },
+      { id: 'acc_2110', code: '2110', name: 'Merchant Available Balance', type: 'LIABILITY', normalBalance: 'CREDIT', description: 'Net settled funds owed to merchants' },
+      { id: 'acc_2120', code: '2120', name: 'Merchant Escrow Hold / Reserve', type: 'LIABILITY', normalBalance: 'CREDIT', description: 'Held reserves for disputes or rolling risk' },
+      { id: 'acc_2210', code: '2210', name: 'Pending Customer Refund Payable', type: 'LIABILITY', normalBalance: 'CREDIT', description: 'Funds earmarked for pending customer refunds' },
+      { id: 'acc_2310', code: '2310', name: 'Gateway Network Fee Payable', type: 'LIABILITY', normalBalance: 'CREDIT', description: 'Interchange and network fees owed to gateways' },
+      { id: 'acc_3100', code: '3100', name: 'Platform Retained Earnings', type: 'EQUITY', normalBalance: 'CREDIT', description: 'Accumulated operating profits' },
+      { id: 'acc_4100', code: '4100', name: 'Platform MDR Processing Fee Revenue', type: 'REVENUE', normalBalance: 'CREDIT', description: 'DenaNeya platform percentage markup fee' },
+      { id: 'acc_4200', code: '4200', name: 'Platform Fixed Transaction Fee Revenue', type: 'REVENUE', normalBalance: 'CREDIT', description: 'Flat transaction fee revenue' },
+      { id: 'acc_5100', code: '5100', name: 'Gateway Interchange Expense', type: 'EXPENSE', normalBalance: 'DEBIT', description: 'Fees charged by payment networks' },
+    ];
+    globalStore.set('ledger_accounts', standardAccounts.map((a) => ({ ...a, createdAt: now })));
+
+    // 4. Default Webhook Subscription
+    const webhookSubs = [
+      {
+        id: 'whs_demo_store_01',
+        merchantId: 'mch_sandbox_demo',
+        url: 'https://denaneya.vercel.app/api/demo-store/webhook',
+        secret: 'whsec_demo_store_webhook_secret_key_2026',
+        events: ['payment.completed', 'payment.failed', 'refund.created', '*'],
+        status: 'ACTIVE',
+        failureCount: 0,
+        description: 'DenaNeya Demo Store Webhook Endpoint',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+    globalStore.set('webhook_subscriptions', webhookSubs);
+  }
+}
+
+// Ensure bootstrap data runs at initialization
+ensureBootstrapData();
+
+/**
  * Reset all in-memory tables (useful in test isolation).
  */
-export function resetInMemoryStore(): void {
+export function resetInMemoryStore(options: { bootstrap?: boolean } = {}): void {
   globalStore.clear();
   transactionStack.length = 0;
+  if (options.bootstrap) {
+    ensureBootstrapData();
+  }
 }
 
 /**
@@ -150,7 +263,7 @@ function splitTopLevel(str: string): string[] {
 }
 
 /**
- * Resolves column value from row supporting both snake_case and camelCase keys.
+ * Resolves column value from row supporting snake_case, camelCase, and table-prefixed keys.
  */
 export function getRowValue(row: any, col: string): any {
   if (row == null || typeof row !== 'object') return undefined;
@@ -161,6 +274,17 @@ export function getRowValue(row: any, col: string): any {
   // camelCase -> snake_case
   const snake = col.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
   if (row[snake] !== undefined) return row[snake];
+
+  // If alias has a table prefix (e.g. payment_amount_paisa -> amountPaisa or amount_paisa)
+  if (col.includes('_')) {
+    const stripped = col.replace(/^[a-zA-Z0-9]+_/, '');
+    if (row[stripped] !== undefined) return row[stripped];
+    const strippedCamel = stripped.replace(/_([a-z0-9])/g, (_, g) => g.toUpperCase());
+    if (row[strippedCamel] !== undefined) return row[strippedCamel];
+    const strippedSnake = stripped.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+    if (row[strippedSnake] !== undefined) return row[strippedSnake];
+  }
+
   return undefined;
 }
 
@@ -323,7 +447,12 @@ export async function executeInMemoryQuery(
   queryInput: any,
   params: any[] = []
 ): Promise<{ rows: any[]; rowCount: number }> {
-  const text = (typeof queryInput === 'string' ? queryInput : queryInput?.text || '').trim();
+  let text = (typeof queryInput === 'string' ? queryInput : queryInput?.text || '').trim();
+  // Strip trailing semicolons
+  text = text.replace(/;\s*$/, '').trim();
+  // Strip concurrency hints (e.g. FOR UPDATE, FOR UPDATE SKIP LOCKED)
+  text = text.replace(/\s+for\s+(?:update|no\s+key\s+update|share|key\s+share)(?:\s+(?:skip\s+locked|nowait))?$/i, '').trim();
+
   const rowMode = queryInput?.rowMode;
   const effectiveParams = params && params.length > 0 ? params : queryInput?.values || [];
 
@@ -545,19 +674,32 @@ export async function executeInMemoryQuery(
     return { rows: [], rowCount: deleted.length };
   }
 
-  // 6. SELECT ... FROM "table" [WHERE ...] [ORDER BY ...] [LIMIT ...] [OFFSET ...]
+  // 6. SELECT ... FROM "table" [JOIN ...] [WHERE ...] [ORDER BY ...] [LIMIT ...] [OFFSET ...]
   const selectMatch = text.match(
-    /select\s+([\s\S]+?)\s+from\s+"([^"]+)"(?:\s+where\s+([\s\S]+?))?(?:\s+order\s+by\s+([\s\S]+?))?(?:\s+limit\s+(\d+|\$\d+))?(?:\s+offset\s+(\d+|\$\d+))?$/i
+    /select\s+([\s\S]+?)\s+from\s+"([^"]+)"(?:\s+(?:left|right|inner|full)?\s*join\s+"([^"]+)"\s+on\s+([\s\S]+?))?(?:\s+where\s+([\s\S]+?))?(?:\s+order\s+by\s+([\s\S]+?))?(?:\s+limit\s+(\d+|\$\d+))?(?:\s+offset\s+(\d+|\$\d+))?$/i
   );
   if (selectMatch && selectMatch[1] && selectMatch[2]) {
     const rawCols = selectMatch[1];
     const tableName = selectMatch[2];
-    const whereClause = selectMatch[3];
-    const orderByClause = selectMatch[4];
-    const limitClause = selectMatch[5];
-    const offsetClause = selectMatch[6];
+    const joinedTable = selectMatch[3];
+    const joinOnClause = selectMatch[4];
+    const whereClause = selectMatch[5];
+    const orderByClause = selectMatch[6];
+    const limitClause = selectMatch[7];
+    const offsetClause = selectMatch[8];
 
-    const tableRows = getTable(tableName);
+    let tableRows = getTable(tableName);
+
+    // If a JOIN is present, merge joined table columns
+    if (joinedTable) {
+      const joinedRows = getTable(joinedTable);
+      tableRows = tableRows.map((r) => {
+        // Attempt to find matching row: e.g. payments.merchantId === merchants.id
+        const foreignKey = r.merchantId || r.merchant_id || r.userId || r.user_id || r.paymentId || r.payment_id;
+        const matchingJoined = joinedRows.find((j) => (foreignKey && (j.id === foreignKey || j.merchant_id === foreignKey))) || {};
+        return { ...matchingJoined, ...r };
+      });
+    }
 
     // Evaluate WHERE
     let filtered = whereClause

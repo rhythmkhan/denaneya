@@ -1,4 +1,7 @@
 import Link from 'next/link';
+import { eq } from 'drizzle-orm';
+import { db } from '@/lib/db';
+import { payments, merchants } from '@denaneya/database';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +18,41 @@ export default async function CheckoutStatusPage({
 }) {
   const { paymentId } = await params;
   const { status = 'COMPLETED', trxId } = await searchParams;
+
+  let merchantReturnUrl = '/';
+  let merchantName = 'Demo Store';
+
+  if (db) {
+    const [p] = await db
+      .select()
+      .from(payments)
+      .where(eq(payments.id, paymentId));
+
+    if (p) {
+      const redirectUrl = (p.metadata as any)?.redirectUrl || null;
+      if (redirectUrl) {
+        try {
+          const u = new URL(redirectUrl, 'https://denaneya.vercel.app');
+          u.searchParams.set('payment_id', paymentId);
+          u.searchParams.set('status', status);
+          if (trxId) u.searchParams.set('trx_id', trxId);
+          merchantReturnUrl = u.toString();
+        } catch {
+          merchantReturnUrl = `${redirectUrl}?payment_id=${paymentId}&status=${status}${trxId ? `&trx_id=${trxId}` : ''}`;
+        }
+      }
+
+      if (p.merchantId) {
+        const [m] = await db
+          .select()
+          .from(merchants)
+          .where(eq(merchants.id, p.merchantId));
+        if (m) {
+          merchantName = m.businessName || m.name || 'Merchant';
+        }
+      }
+    }
+  }
 
   const isSuccess = status === 'COMPLETED';
   const isFailed = status === 'FAILED' || status === 'CANCELLED';
@@ -77,9 +115,9 @@ export default async function CheckoutStatusPage({
       </CardContent>
 
       <CardFooter className="pt-2 pb-6">
-        <Link href="/" className="w-full">
+        <Link href={merchantReturnUrl} className="w-full">
           <Button className="w-full gap-2">
-            Return to Merchant Website <ArrowRight className="w-4 h-4" />
+            Return to {merchantName} <ArrowRight className="w-4 h-4" />
           </Button>
         </Link>
       </CardFooter>

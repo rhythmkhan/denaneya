@@ -53,23 +53,36 @@ export async function GET(
       throw new ApiError('PAYMENT_NOT_FOUND', `Payment with ID '${id}' was not found.`, 404, requestId);
     }
 
-    const netPaisa = payment.amountPaisa - payment.feePaisa - payment.refundedAmountPaisa;
+    const amountPaisa = BigInt(payment.amountPaisa || 0);
+    const feePaisa = BigInt(payment.feePaisa || 0);
+    const refundedPaisa = BigInt(payment.refundedAmountPaisa || 0);
+    const netPaisa = amountPaisa - feePaisa - refundedPaisa;
+
+    const toIsoDate = (d: any) => {
+      if (!d) return null;
+      if (d instanceof Date) return d.toISOString();
+      try {
+        return new Date(d).toISOString();
+      } catch {
+        return new Date().toISOString();
+      }
+    };
 
     return jsonResponse(
       {
         id: payment.id,
         merchantId: payment.merchantId,
-        amountPaisa: payment.amountPaisa.toString(),
-        feePaisa: payment.feePaisa.toString(),
-        refundedAmountPaisa: payment.refundedAmountPaisa.toString(),
+        amountPaisa: amountPaisa.toString(),
+        feePaisa: feePaisa.toString(),
+        refundedAmountPaisa: refundedPaisa.toString(),
         netPaisa: netPaisa.toString(),
-        currency: payment.currency,
-        status: payment.status,
-        provider: payment.provider,
-        providerTrxId: payment.providerTrxId,
-        providerSessionId: payment.providerSessionId,
-        verifiedTier: payment.verifiedTier,
-        riskScore: payment.riskScore,
+        currency: payment.currency || 'BDT',
+        status: payment.status || 'CREATED',
+        provider: payment.provider || 'SANDBOX',
+        providerTrxId: payment.providerTrxId || null,
+        providerSessionId: payment.providerSessionId || null,
+        verifiedTier: payment.verifiedTier || null,
+        riskScore: payment.riskScore ?? null,
         customer: {
           name: payment.customerName,
           email: payment.customerEmail,
@@ -78,15 +91,15 @@ export async function GET(
         },
         refunds: paymentRefunds.map((r) => ({
           id: r.id,
-          amountPaisa: r.amountPaisa.toString(),
+          amountPaisa: String(r.amountPaisa || '0'),
           status: r.status,
           reason: r.reason,
-          createdAt: r.createdAt.toISOString(),
+          createdAt: toIsoDate(r.createdAt),
         })),
         timeline: {
-          createdAt: payment.createdAt.toISOString(),
-          settledAt: payment.settledAt ? payment.settledAt.toISOString() : null,
-          updatedAt: payment.updatedAt.toISOString(),
+          createdAt: toIsoDate(payment.createdAt) || new Date().toISOString(),
+          settledAt: toIsoDate(payment.settledAt),
+          updatedAt: toIsoDate(payment.updatedAt) || new Date().toISOString(),
         },
         metadata: payment.metadata,
       },

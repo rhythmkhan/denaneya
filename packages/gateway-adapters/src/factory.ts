@@ -53,6 +53,7 @@ export class GatewayFactory {
         adapter = new NagadAdapter(config as NagadConfig);
         break;
       case 'MOCK':
+      case 'SANDBOX' as any:
         adapter = new MockAdapter(config as MockConfig);
         break;
       default:

@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import crypto from 'node:crypto';
 import { eq, and } from 'drizzle-orm';
-import { db } from '@/lib/db';
+import { db, ensureBootstrapData } from '@/lib/db';
 import { apiKeys, merchants } from '@denaneya/database';
 import { ApiError } from './errors';
 
@@ -94,6 +94,7 @@ export async function authenticateApiKey(
   const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
 
   // Look up candidate key records by prefix and environment
+  ensureBootstrapData();
   const candidateKeys = db ? await db
     .select()
     .from(apiKeys)

@@ -42,6 +42,10 @@ export function Navbar() {
             <Link href="/docs" className="hover:text-emerald-600 transition">
               Docs
             </Link>
+            <Link href="/demo-store" className="text-indigo-600 dark:text-indigo-400 font-semibold hover:text-indigo-700 transition flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Demo Store
+            </Link>
             <Link href="/security" className="hover:text-emerald-600 transition flex items-center gap-1">
               <ShieldCheck className="w-4 h-4 text-emerald-600" />
               Security

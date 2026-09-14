@@ -33,10 +33,28 @@ export default async function CheckoutPage({
       .leftJoin(merchants, eq(payments.merchantId, merchants.id))
       .where(eq(payments.id, paymentId));
 
-    if (row) {
+    if (row && row.payment) {
       paymentRecord = row.payment;
       merchantName = row.merchant?.businessName || row.merchant?.name || 'Merchant';
       isSandbox = row.merchant?.environment === 'SANDBOX';
+    } else {
+      const [p] = await db
+        .select()
+        .from(payments)
+        .where(eq(payments.id, paymentId));
+      if (p) {
+        paymentRecord = p;
+        if (p.merchantId) {
+          const [m] = await db
+            .select()
+            .from(merchants)
+            .where(eq(merchants.id, p.merchantId));
+          if (m) {
+            merchantName = m.businessName || m.name || 'Merchant';
+            isSandbox = m.environment === 'SANDBOX';
+          }
+        }
+      }
     }
   }
 
