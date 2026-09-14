@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["../web/src/*"],
+      "@denaneya/observability": ["../../packages/observability/src/index.ts"],
+      "@denaneya/security": ["../../packages/security/src/index.ts"],
+      "@denaneya/database": ["../../packages/database/src/index.ts"],
+      "@denaneya/payment-core": ["../../packages/payment-core/src/index.ts"],
+      "@denaneya/sms-parser": ["../../packages/sms-parser/src/index.ts"],
+      "@denaneya/fraud-engine": ["../../packages/fraud-engine/src/index.ts"],
+      "@denaneya/gateway-adapters": ["../../packages/gateway-adapters/src/index.ts"],
+      "@denaneya/ledger": ["../../packages/ledger/src/index.ts"],
+      "@denaneya/webhooks": ["../../packages/webhooks/src/index.ts"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.mts"]
+}

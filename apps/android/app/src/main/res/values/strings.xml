@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DenaNeya Collector</string>
+    <string name="app_tagline">দেনা-নেওয়া সহজ, হিসাব নিশ্চিত।</string>
+    <string name="notification_listener_label">DenaNeya MFS Notification Listener</string>
+    <string name="sync_worker_channel_name">DenaNeya SMS Sync</string>
+    <string name="sync_worker_channel_desc">Shows background synchronization status for MFS payments</string>
+</resources>

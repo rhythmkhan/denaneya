@@ -1,0 +1,14 @@
+{
+  "name": "@denaneya/android-collector",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Native Android SMS Collector for DenaNeya Bangladesh Payment Orchestration",
+  "scripts": {
+    "build": "gradlew assembleDebug",
+    "build:release": "gradlew assembleRelease",
+    "test": "gradlew testDebugUnitTest",
+    "test:cross": "tsx test_cross_verification.mts",
+    "lint": "gradlew lintDebug",
+    "clean": "gradlew clean"
+  }
+}
