@@ -1,0 +1,139 @@
+name: DenaNeya CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_ENV: test
+  CI: "true"
+  TURBO_TELEMETRY_DISABLED: "1"
+
+jobs:
+  lint-and-typecheck:
+    name: Lint & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 11.17.0
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Turborepo Typecheck
+        run: pnpm turbo run typecheck
+
+      - name: Turborepo Lint (Web & Packages)
+        run: pnpm turbo run lint --filter=!@denaneya/android-collector
+
+  test-monorepo:
+    name: Test Monorepo Packages & Web
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 11.17.0
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Uncached Monorepo Unit & Integration Tests
+        run: pnpm turbo run test --force --filter=!@denaneya/android-collector -- --run
+
+      - name: Run Coverage Suite
+        run: pnpm turbo run test:coverage --force --filter=!@denaneya/android-collector -- --run
+        continue-on-error: true
+
+  test-android:
+    name: Android Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle Cache
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Grant Execute Permission for Gradlew
+        run: chmod +x apps/android/gradlew
+
+      - name: Run Android Unit Tests
+        working-directory: apps/android
+        run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Install pnpm for Cross-Verification
+        uses: pnpm/action-setup@v3
+        with:
+          version: 11.17.0
+
+      - name: Setup Node.js for Cross-Verification
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install Dependencies for Cross-Verification
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Android-Backend Cross-Verification Test
+        working-directory: apps/android
+        run: pnpm test:cross
+
+  secret-scan:
+    name: Secret & Credential Leak Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Full Git History
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks Secret Detection
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: false
+
+      - name: Custom High-Risk Pattern Scan
+        run: |
+          echo "Scanning for accidental hardcoded secrets..."
+          ! grep -rE '(BEGIN RSA PRIVATE KEY|BEGIN EC PRIVATE KEY|sk_live_|ghp_[A-Za-z0-9]{36}|postgres:\/\/.*:.*@)' \
+            --exclude-dir={.git,node_modules,.next,dist,build} \
+            --exclude={.env.example,*.md} .
