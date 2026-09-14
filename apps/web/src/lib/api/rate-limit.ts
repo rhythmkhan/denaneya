@@ -7,7 +7,10 @@ export async function checkRateLimit(
   identifier: string,
   rule: RateLimitRule = RATE_LIMIT_RULES.PAYMENT_API
 ): Promise<Record<string, string>> {
-  const clientIp = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || '127.0.0.1';
+  const clientIp =
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    request.headers.get('x-real-ip')?.trim() ||
+    '127.0.0.1';
   const key = `ratelimit:${rule.name}:${identifier || clientIp}`;
 
   const result = await defaultRateLimiter.check(key, rule);
@@ -31,4 +34,16 @@ export async function checkRateLimit(
   }
 
   return headers;
+}
+
+export function getRateLimiter() {
+  return defaultRateLimiter;
+}
+
+export async function resetRateLimit(
+  identifier: string,
+  rule: RateLimitRule = RATE_LIMIT_RULES.PAYMENT_API
+): Promise<void> {
+  const key = `ratelimit:${rule.name}:${identifier}`;
+  await defaultRateLimiter.reset(key);
 }

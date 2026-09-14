@@ -25,14 +25,23 @@ export class BkashAdapter extends BasePaymentGatewayAdapter<BkashConfig> {
   private cachedToken: string | null = null;
   private cachedRefreshToken: string | null = null;
   private tokenExpiresAt = 0;
+  private cachedTokenSandbox: boolean | null = null;
 
-  private get baseUrl(): string {
-    return this.config.isSandbox
+  public get baseUrl(): string {
+    if (this.config.baseUrl) return this.config.baseUrl;
+    if (process.env.BKASH_BASE_URL) return process.env.BKASH_BASE_URL;
+    return this.isSandbox
       ? 'https://tokenized.sandbox.bka.sh/v2/tokenized/checkout'
       : 'https://tokenized.pay.bka.sh/v2/tokenized/checkout';
   }
 
   async getAuthToken(): Promise<string> {
+    if (this.cachedTokenSandbox !== null && this.cachedTokenSandbox !== this.isSandbox) {
+      this.cachedToken = null;
+      this.cachedRefreshToken = null;
+      this.tokenExpiresAt = 0;
+    }
+
     if (this.cachedToken && Date.now() < this.tokenExpiresAt) {
       return this.cachedToken;
     }
@@ -67,6 +76,7 @@ export class BkashAdapter extends BasePaymentGatewayAdapter<BkashConfig> {
           }
           const expiresIn = data.expires_in ?? 3600;
           this.tokenExpiresAt = Date.now() + Math.max(0, expiresIn - 60) * 1000;
+          this.cachedTokenSandbox = this.isSandbox;
           return this.cachedToken!;
         }
       } catch {
@@ -108,6 +118,7 @@ export class BkashAdapter extends BasePaymentGatewayAdapter<BkashConfig> {
     this.cachedRefreshToken = data.refresh_token ?? null;
     const expiresIn = data.expires_in ?? 3600;
     this.tokenExpiresAt = Date.now() + Math.max(0, expiresIn - 60) * 1000;
+    this.cachedTokenSandbox = this.isSandbox;
 
     return this.cachedToken!;
   }
@@ -411,7 +422,11 @@ export class BkashAdapter extends BasePaymentGatewayAdapter<BkashConfig> {
     }
 
     // 1. If cryptographic HMAC signature header is provided, verify it
-    const signature = headers['x-bkash-signature'] || headers['x-signature'];
+    const headerKeys = Object.keys(headers || {});
+    const sigKey = headerKeys.find(
+      (k) => k.toLowerCase() === 'x-bkash-signature' || k.toLowerCase() === 'x-signature'
+    );
+    const signature = sigKey ? headers[sigKey] : undefined;
     if (signature) {
       const rawPayload = typeof body === 'string' ? body : JSON.stringify(body);
       const expected = hmacSha256(rawPayload, this.config.appSecret);

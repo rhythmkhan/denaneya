@@ -1,4 +1,4 @@
-﻿import { Paisa } from '@denaneya/payment-core';
+import { Paisa } from '@denaneya/payment-core';
 
 export const GATEWAY_PROVIDERS = [
   'SSLCOMMERZ',
@@ -63,6 +63,7 @@ export interface VerifyPaymentParams {
   amount?: Paisa;
   rawCallbackParams?: Record<string, string | unknown>;
   signature?: string;
+  provider?: GatewayProvider;
 }
 
 export type GatewayTransactionStatus =
@@ -95,6 +96,7 @@ export interface RefundParams {
   totalCapturedAmount: Paisa;
   refundReason: string;
   refundId: string;
+  provider?: GatewayProvider;
 }
 
 export interface RefundResult {
@@ -136,8 +138,42 @@ export interface GatewayHealthStatus {
 }
 
 export interface BaseGatewayConfig {
-  isSandbox: boolean;
+  isSandbox?: boolean;
+  sandbox?: boolean;
+  baseUrl?: string;
   timeoutMs?: number;
+}
+
+export interface GatewayHealthState {
+  provider: GatewayProvider;
+  status: 'UP' | 'DEGRADED' | 'DOWN';
+  consecutiveFailures: number;
+  consecutiveSuccesses: number;
+  lastFailureTime?: number;
+  lastSuccessTime?: number;
+  lastProbeTime?: number;
+  lastError?: string;
+  latencyMs?: number;
+}
+
+export interface FailoverRouterConfig {
+  primaryProvider?: GatewayProvider;
+  fallbackProviders?: GatewayProvider[];
+  methodRouting?: Partial<Record<PaymentMethodType, GatewayProvider[]>>;
+  failureThreshold?: number;
+  degradedThreshold?: number;
+  recoveryCooldownMs?: number;
+  successThresholdForRecovery?: number;
+  failoverOnDegraded?: boolean;
+  maxFailoverAttempts?: number;
+}
+
+export interface GatewayFailoverExecutionResult<T> {
+  result: T;
+  providerUsed: GatewayProvider;
+  failoverOccurred: boolean;
+  attempts: number;
+  errors?: Array<{ provider: GatewayProvider; error: unknown }>;
 }
 
 export interface SslCommerzConfig extends BaseGatewayConfig {

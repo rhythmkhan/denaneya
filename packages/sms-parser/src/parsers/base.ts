@@ -1,6 +1,7 @@
-﻿import { Paisa } from '@denaneya/payment-core';
+import { Paisa } from '@denaneya/payment-core';
 import type { MfsProvider, ParsedSmsResult, ProviderParser, SmsTransactionType } from '../types.js';
 import { computeSmsHash } from '../utils/crypto.js';
+import { normalizeBengaliNumerals } from '../utils/bengali.js';
 
 export abstract class BaseProviderParser implements ProviderParser {
   abstract readonly provider: MfsProvider;
@@ -74,10 +75,29 @@ export abstract class BaseProviderParser implements ProviderParser {
   }
 
   /**
-   * Extracts Paisa safely from a BDT string (e.g. "1,250.00" or "500")
+   * Extracts Paisa safely from a BDT string (e.g. "1,250.00", "500", or "১,২৫০.০০")
+   * Guaranteed zero floating-point arithmetic.
    */
   protected parsePaisa(amountStr: string): Paisa {
-    const clean = amountStr.replace(/,/g, '').trim();
+    if (!amountStr) return Paisa.zero();
+    let clean = normalizeBengaliNumerals(amountStr).replace(/,/g, '').trim();
+
+    // Strip trailing zeros beyond 2 decimal places (e.g. 10.500 -> 10.50)
+    const dotIdx = clean.indexOf('.');
+    if (dotIdx !== -1 && clean.length - dotIdx - 1 > 2) {
+      clean = clean.replace(/(\.\d{2})0+$/, '$1');
+      const m = clean.match(/^([+-]?\d+)\.(\d+)$/);
+      if (m && m[2]!.length > 2) {
+        const whole = BigInt(m[1]!);
+        const fracDigits = m[2]!;
+        const firstTwo = BigInt(fracDigits.slice(0, 2));
+        const third = parseInt(fracDigits[2]!, 10);
+        const roundedFrac = third >= 5 ? firstTwo + 1n : firstTwo;
+        const totalPaisa = whole * 100n + (whole >= 0n ? roundedFrac : -roundedFrac);
+        return new Paisa(totalPaisa);
+      }
+    }
+
     return Paisa.fromBDT(clean);
   }
 }

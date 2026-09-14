@@ -64,6 +64,19 @@ export interface RateLimitStore {
   reset(key: string): Promise<void>;
 }
 
+export interface UpstashRedisConfig {
+  url?: string;
+  token?: string;
+  timeoutMs?: number;
+}
+
+export interface ResilientRateLimiterOptions {
+  redisUrl?: string;
+  redisToken?: string;
+  timeoutMs?: number;
+  fallbackStore?: RateLimitStore;
+}
+
 // RBAC Types
 export type Role =
   | 'PLATFORM_ADMIN'

@@ -29,8 +29,10 @@ export class SslCommerzAdapter extends BasePaymentGatewayAdapter<SslCommerzConfi
     'INTERNET_BANKING',
   ] as const;
 
-  private get baseUrl(): string {
-    return this.config.isSandbox
+  public get baseUrl(): string {
+    if (this.config.baseUrl) return this.config.baseUrl;
+    if (process.env.SSLCOMMERZ_BASE_URL) return process.env.SSLCOMMERZ_BASE_URL;
+    return this.isSandbox
       ? 'https://sandbox.sslcommerz.com'
       : 'https://securepay.sslcommerz.com';
   }
@@ -257,31 +259,44 @@ export class SslCommerzAdapter extends BasePaymentGatewayAdapter<SslCommerzConfi
         ? Object.fromEntries(new URLSearchParams(body).entries())
         : (body as Record<string, string>);
 
-    if (!params.verify_sign || !params.verify_key) {
-      return false;
+    if (params.verify_sign && params.verify_key) {
+      const verifySign = params.verify_sign;
+      const verifyKeys = params.verify_key.split(',');
+      const parts: string[] = [];
+
+      for (const k of verifyKeys) {
+        const val = params[k] ?? '';
+        parts.push(`${k}=${val}`);
+      }
+
+      const passwordHash = md5(this.config.storePassword);
+      parts.push(`store_passwd=${passwordHash}`);
+      const hashPayload = parts.join('&');
+      const calculatedHash = md5(hashPayload);
+
+      const bufCalculated = Buffer.from(calculatedHash.toLowerCase(), 'utf8');
+      const bufReceived = Buffer.from(verifySign.toLowerCase(), 'utf8');
+
+      return (
+        bufCalculated.length === bufReceived.length &&
+        crypto.timingSafeEqual(bufCalculated, bufReceived)
+      );
     }
 
-    const verifySign = params.verify_sign;
-    const verifyKeys = params.verify_key.split(',');
-    const parts: string[] = [];
-
-    for (const k of verifyKeys) {
-      const val = params[k] ?? '';
-      parts.push(`${k}=${val}`);
+    // IPN fallback: If SSLCOMMERZ sends IPN without verify_sign but with val_id, verify upstream
+    if (params.val_id) {
+      try {
+        const verification = await this.verifyPayment({
+          paymentId: params.tran_id || '',
+          rawCallbackParams: params,
+        });
+        return verification.status === 'COMPLETED';
+      } catch {
+        return false;
+      }
     }
 
-    const passwordHash = md5(this.config.storePassword);
-    parts.push(`store_passwd=${passwordHash}`);
-    const hashPayload = parts.join('&');
-    const calculatedHash = md5(hashPayload);
-
-    const bufCalculated = Buffer.from(calculatedHash.toLowerCase(), 'utf8');
-    const bufReceived = Buffer.from(verifySign.toLowerCase(), 'utf8');
-
-    return (
-      bufCalculated.length === bufReceived.length &&
-      crypto.timingSafeEqual(bufCalculated, bufReceived)
-    );
+    return false;
   }
 
   async queryPayment(providerTrxId: string): Promise<PaymentDetailsResult> {

@@ -766,6 +766,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenericSuccessResponse'
+  /api/v1/health/db:
+    get:
+      tags:
+      - Observability
+      summary: Database connection health status
+      description: Probes Neon PostgreSQL connection pooler and reports real-time latency and status (UP, DEGRADED, MOCK, DOWN).
+      operationId: getDatabaseHealth
+      responses:
+        '200':
+          description: Database connection is operational or running in resilient mock fallback mode
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabaseHealthResponse'
+        '503':
+          description: Database connection probe failed after all retries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DatabaseHealthResponse'
   /api/v1/gateways/health:
     get:
       tags:
@@ -1728,6 +1748,38 @@ components:
         isCharging:
           type: boolean
         networkType:
+          type: string
+    DatabaseHealthResponse:
+      type: object
+      required:
+      - status
+      - latencyMs
+      - timestamp
+      - mode
+      properties:
+        status:
+          type: string
+          enum:
+          - UP
+          - DEGRADED
+          - MOCK
+          - DOWN
+        latencyMs:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+        mode:
+          type: string
+          enum:
+          - neon-pooled
+          - direct
+          - mock
+        host:
+          type: string
+        message:
+          type: string
+        error:
           type: string
     GatewayHealthResponse:
       type: object

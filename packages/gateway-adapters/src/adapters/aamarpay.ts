@@ -29,8 +29,10 @@ export class AamarPayAdapter extends BasePaymentGatewayAdapter<AamarPayConfig> {
     'INTERNET_BANKING',
   ] as const;
 
-  private get baseUrl(): string {
-    return this.config.isSandbox
+  public get baseUrl(): string {
+    if (this.config.baseUrl) return this.config.baseUrl;
+    if (process.env.AAMARPAY_BASE_URL) return process.env.AAMARPAY_BASE_URL;
+    return this.isSandbox
       ? 'https://sandbox.aamarpay.com'
       : 'https://secure.aamarpay.com';
   }
@@ -224,7 +226,11 @@ export class AamarPayAdapter extends BasePaymentGatewayAdapter<AamarPayConfig> {
       return false;
     }
 
-    const signature = headers['x-aamarpay-signature'] || headers['x-signature'];
+    const headerKeys = Object.keys(headers || {});
+    const sigKey = headerKeys.find(
+      (k) => k.toLowerCase() === 'x-aamarpay-signature' || k.toLowerCase() === 'x-signature'
+    );
+    const signature = sigKey ? headers[sigKey] : undefined;
     if (signature) {
       const rawPayload = typeof body === 'string' ? body : JSON.stringify(body);
       const expected = hmacSha256(rawPayload, this.config.signatureKey);

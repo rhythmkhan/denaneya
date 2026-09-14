@@ -32,14 +32,23 @@ export class ShurjoPayAdapter extends BasePaymentGatewayAdapter<ShurjoPayConfig>
   private cachedToken: string | null = null;
   private cachedStoreId: number | string | null = null;
   private tokenExpiresAt = 0;
+  private cachedTokenSandbox: boolean | null = null;
 
-  private get baseUrl(): string {
-    return this.config.isSandbox
+  public get baseUrl(): string {
+    if (this.config.baseUrl) return this.config.baseUrl;
+    if (process.env.SHURJOPAY_BASE_URL) return process.env.SHURJOPAY_BASE_URL;
+    return this.isSandbox
       ? 'https://sandbox.shurjopayment.com/api'
       : 'https://engine.shurjopay.com/api';
   }
 
   async ensureToken(): Promise<{ token: string; storeId: number | string }> {
+    if (this.cachedTokenSandbox !== null && this.cachedTokenSandbox !== this.isSandbox) {
+      this.cachedToken = null;
+      this.cachedStoreId = null;
+      this.tokenExpiresAt = 0;
+    }
+
     if (this.cachedToken && Date.now() < this.tokenExpiresAt && this.cachedStoreId) {
       return { token: this.cachedToken, storeId: this.cachedStoreId };
     }
@@ -74,6 +83,7 @@ export class ShurjoPayAdapter extends BasePaymentGatewayAdapter<ShurjoPayConfig>
     this.cachedStoreId = data.store_id;
     const expiresInSec = data.expires_in ?? 3600;
     this.tokenExpiresAt = Date.now() + Math.max(0, expiresInSec - 60) * 1000;
+    this.cachedTokenSandbox = this.isSandbox;
 
     return { token: data.token, storeId: this.cachedStoreId! };
   }
@@ -268,7 +278,11 @@ export class ShurjoPayAdapter extends BasePaymentGatewayAdapter<ShurjoPayConfig>
       return false;
     }
 
-    const signature = headers['x-shurjopay-signature'] || headers['x-signature'];
+    const headerKeys = Object.keys(headers || {});
+    const sigKey = headerKeys.find(
+      (k) => k.toLowerCase() === 'x-shurjopay-signature' || k.toLowerCase() === 'x-signature'
+    );
+    const signature = sigKey ? headers[sigKey] : undefined;
     if (signature) {
       const rawPayload = typeof body === 'string' ? body : JSON.stringify(body);
       const expected = hmacSha256(rawPayload, this.config.password);

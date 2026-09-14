@@ -1,4 +1,4 @@
-﻿import { Paisa } from '@denaneya/payment-core';
+import { Paisa } from '@denaneya/payment-core';
 import type {
   BalanceChainStatus,
   BalanceChainVerificationInput,
@@ -30,8 +30,19 @@ export class BalanceChainEngine {
       };
     }
 
-    // 2. If no previous balance baseline exists, bootstrap baseline
+    // 2. If no previous balance baseline exists, attempt out-of-order resolution if history exists, or bootstrap baseline
     if (!previousBalancePaisa) {
+      if (history && history.length > 0) {
+        const oooResult = BalanceChainEngine.resolveOutOfOrder(
+          walletId,
+          incomingSms,
+          history
+        );
+        if (oooResult.status === 'VERIFIED') {
+          return oooResult;
+        }
+      }
+
       return {
         status: 'UNKNOWN_BASELINE',
         walletId,
@@ -46,6 +57,20 @@ export class BalanceChainEngine {
     }
 
     // 3. Compute Expected Balance based on transaction type
+    if (incomingSms.type === 'UNKNOWN') {
+      return {
+        status: 'DISCONTINUITY_DETECTED',
+        walletId,
+        previousBalancePaisa,
+        expectedNewBalancePaisa: null,
+        reportedBalancePaisa: reportedBalance,
+        deltaPaisa: null,
+        isDiscontinuity: true,
+        discontinuityType: 'TAMPERING',
+        message: 'Cannot verify balance chain for transaction of UNKNOWN type.',
+      };
+    }
+
     const amount = incomingSms.amountPaisa;
     const fee = incomingSms.feePaisa ?? Paisa.zero();
     let expectedBalance: Paisa;
@@ -119,7 +144,7 @@ export class BalanceChainEngine {
   }
 
   /**
-   * Resequences history chronologically to resolve out-of-order SMS delivery.
+   * Resequences history chronologically to resolve out-of-order SMS delivery across month boundaries.
    */
   private static resolveOutOfOrder(
     walletId: string,
@@ -132,7 +157,21 @@ export class BalanceChainEngine {
       .slice()
       .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
-    // Locate immediately preceding transaction before incoming SMS
+    if (!incoming.balancePaisa) {
+      return {
+        status: 'UNKNOWN_BASELINE',
+        walletId,
+        previousBalancePaisa: null,
+        expectedNewBalancePaisa: null,
+        reportedBalancePaisa: null,
+        deltaPaisa: null,
+        isDiscontinuity: false,
+        discontinuityType: 'NONE',
+        message: 'Incoming SMS does not report rolling balance; cannot resolve out-of-order chain.',
+      };
+    }
+
+    // Locate immediately preceding transaction before incoming SMS and next transaction
     let prevTx: ParsedSmsResult | null = null;
     let nextTx: ParsedSmsResult | null = null;
 
@@ -145,7 +184,33 @@ export class BalanceChainEngine {
       }
     }
 
-    if (!prevTx || !prevTx.balancePaisa || !incoming.balancePaisa) {
+    // Special Case: Incoming transaction precedes the entire history window (e.g. across month boundary)
+    if (!prevTx && nextTx && nextTx.balancePaisa) {
+      const nextFee = nextTx.feePaisa ?? Paisa.zero();
+      let expectedNext: Paisa;
+      if (nextTx.type === 'CASH_OUT' || nextTx.type === 'SEND_MONEY') {
+        expectedNext = incoming.balancePaisa.subtract(nextTx.amountPaisa.add(nextFee), true);
+      } else {
+        expectedNext = incoming.balancePaisa.add(nextTx.amountPaisa).subtract(nextFee, true);
+      }
+
+      if (expectedNext.equals(nextTx.balancePaisa)) {
+        return {
+          status: 'VERIFIED',
+          walletId,
+          previousBalancePaisa: null,
+          expectedNewBalancePaisa: incoming.balancePaisa,
+          reportedBalancePaisa: incoming.balancePaisa,
+          deltaPaisa: Paisa.zero(),
+          isDiscontinuity: false,
+          discontinuityType: 'NONE',
+          resolvedOutOfOrder: true,
+          message: `Out-of-order SMS preceding monthly baseline successfully reconciled against ${nextTx.trxId}.`,
+        };
+      }
+    }
+
+    if (!prevTx || !prevTx.balancePaisa) {
       return {
         status: 'DISCONTINUITY_DETECTED',
         walletId,
@@ -170,7 +235,7 @@ export class BalanceChainEngine {
       expectedIncoming = prevBal.add(incoming.amountPaisa).subtract(fee, true);
     }
 
-    const matchesPrev = expectedIncoming.equals(incoming.balancePaisa);
+    let matchesPrev = expectedIncoming.equals(incoming.balancePaisa);
 
     // Step B: Verify (incoming -> nextTx) if nextTx exists
     let matchesNext = true;
@@ -183,6 +248,22 @@ export class BalanceChainEngine {
         expectedNext = incoming.balancePaisa.add(nextTx.amountPaisa).subtract(nextFee, true);
       }
       matchesNext = expectedNext.equals(nextTx.balancePaisa);
+    }
+
+    // Handle timestamp tie-breaking: If timestamps are identical, also test if incoming happened before prevTx
+    if (!matchesPrev && prevTx.timestamp.getTime() === incoming.timestamp.getTime()) {
+      const prevFee = prevTx.feePaisa ?? Paisa.zero();
+      let expectedPrevBal: Paisa;
+      if (prevTx.type === 'CASH_OUT' || prevTx.type === 'SEND_MONEY') {
+        expectedPrevBal = incoming.balancePaisa.subtract(prevTx.amountPaisa.add(prevFee), true);
+      } else {
+        expectedPrevBal = incoming.balancePaisa.add(prevTx.amountPaisa).subtract(prevFee, true);
+      }
+      if (expectedPrevBal.equals(prevTx.balancePaisa)) {
+        matchesPrev = true;
+        matchesNext = true;
+        expectedIncoming = incoming.balancePaisa;
+      }
     }
 
     if (matchesPrev && matchesNext) {

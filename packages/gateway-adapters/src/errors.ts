@@ -1,4 +1,5 @@
 import type { GatewayProvider } from './types.js';
+import { sanitizeCredentials, sanitizeString } from './utils/sanitize.js';
 
 export const GATEWAY_ERROR_CODES = [
   'AUTHENTICATION_FAILED',
@@ -40,17 +41,31 @@ export class GatewayError extends Error {
   readonly isRetryable: boolean;
 
   constructor(options: GatewayErrorOptions) {
-    super(`[${options.provider}] ${options.code}: ${options.message}`);
+    const sanitizedMsg = sanitizeString(options.message);
+    super(`[${options.provider}] ${options.code}: ${sanitizedMsg}`);
     this.name = 'GatewayError';
     this.provider = options.provider;
     this.code = options.code;
     this.httpStatus = options.httpStatus ?? this.defaultHttpStatus(options.code);
-    this.rawResponse = options.rawResponse;
+    this.rawResponse =
+      options.rawResponse !== undefined ? sanitizeCredentials(options.rawResponse) : undefined;
     this.isRetryable = options.isRetryable ?? this.determineRetryable(options.code);
     if (options.cause) {
       (this as any).cause = options.cause;
     }
     Object.setPrototypeOf(this, new.target.prototype);
+  }
+
+  toSanitizedJSON(): Record<string, unknown> {
+    return {
+      name: this.name,
+      provider: this.provider,
+      code: this.code,
+      message: this.message,
+      httpStatus: this.httpStatus,
+      isRetryable: this.isRetryable,
+      rawResponse: this.rawResponse,
+    };
   }
 
   private determineRetryable(code: GatewayErrorCode): boolean {

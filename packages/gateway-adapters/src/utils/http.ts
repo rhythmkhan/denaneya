@@ -1,5 +1,6 @@
 import { GatewayError } from '../errors.js';
 import type { GatewayProvider } from '../types.js';
+import { sanitizeUrl } from './sanitize.js';
 
 export interface HttpRequestOptions extends RequestInit {
   timeoutMs?: number;
@@ -17,6 +18,8 @@ export async function fetchWithTimeout(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+  const sanitizedUrl = sanitizeUrl(url);
+
   try {
     const response = await fetch(url, {
       ...options,
@@ -28,7 +31,7 @@ export async function fetchWithTimeout(
       throw new GatewayError({
         provider,
         code: 'NETWORK_TIMEOUT',
-        message: `Upstream gateway ${provider} gateway timeout (HTTP 504) on ${url}`,
+        message: `Upstream gateway ${provider} gateway timeout (HTTP 504) on ${sanitizedUrl}`,
         httpStatus: 504,
         isRetryable: true,
       });
@@ -39,7 +42,7 @@ export async function fetchWithTimeout(
       throw new GatewayError({
         provider,
         code: 'GATEWAY_UNAVAILABLE',
-        message: `Upstream gateway ${provider} returned HTTP ${response.status} on ${url}`,
+        message: `Upstream gateway ${provider} returned HTTP ${response.status} on ${sanitizedUrl}`,
         httpStatus: 502,
         isRetryable: true,
       });
@@ -50,7 +53,7 @@ export async function fetchWithTimeout(
       throw new GatewayError({
         provider,
         code: 'RATE_LIMIT_EXCEEDED',
-        message: `Upstream gateway ${provider} rate limited request (HTTP 429) on ${url}`,
+        message: `Upstream gateway ${provider} rate limited request (HTTP 429) on ${sanitizedUrl}`,
         httpStatus: 429,
         isRetryable: true,
       });
@@ -66,7 +69,7 @@ export async function fetchWithTimeout(
       throw new GatewayError({
         provider,
         code: 'NETWORK_TIMEOUT',
-        message: `HTTP request to ${url} timed out after ${timeoutMs}ms`,
+        message: `HTTP request to ${sanitizedUrl} timed out after ${timeoutMs}ms`,
         httpStatus: 504,
         isRetryable: true,
         cause: err,
@@ -76,7 +79,7 @@ export async function fetchWithTimeout(
     throw new GatewayError({
       provider,
       code: 'GATEWAY_UNAVAILABLE',
-      message: `Failed to connect to gateway upstream (${url}): ${err.message}`,
+      message: `Failed to connect to gateway upstream (${sanitizedUrl}): ${err.message}`,
       httpStatus: 502,
       isRetryable: true,
       cause: err,

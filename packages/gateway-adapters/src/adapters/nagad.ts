@@ -22,8 +22,10 @@ export class NagadAdapter extends BasePaymentGatewayAdapter<NagadConfig> {
   readonly provider = 'NAGAD' as const;
   readonly supportedMethods = ['NAGAD'] as const;
 
-  private get baseUrl(): string {
-    return this.config.isSandbox
+  public get baseUrl(): string {
+    if (this.config.baseUrl) return this.config.baseUrl;
+    if (process.env.NAGAD_BASE_URL) return process.env.NAGAD_BASE_URL;
+    return this.isSandbox
       ? 'http://sandbox.mynagad.com:10080/remote-payment-gateway-1.0/api/dfs'
       : 'https://api.mynagad.com/api/dfs';
   }
@@ -265,7 +267,11 @@ export class NagadAdapter extends BasePaymentGatewayAdapter<NagadConfig> {
     headers: Record<string, string>,
     body: string | Record<string, unknown>
   ): Promise<boolean> {
-    const signature = headers['x-km-signature'] || headers['signature'];
+    const headerKeys = Object.keys(headers || {});
+    const sigKey = headerKeys.find(
+      (k) => k.toLowerCase() === 'x-km-signature' || k.toLowerCase() === 'signature'
+    );
+    const signature = sigKey ? headers[sigKey] : undefined;
     if (!signature) {
       return false;
     }

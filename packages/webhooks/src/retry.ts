@@ -1,4 +1,4 @@
-import { sql, eq } from 'drizzle-orm';
+import { sql, eq, and, desc } from 'drizzle-orm';
 import { webhookDeliveries, webhookSubscriptions } from '@denaneya/database';
 import { dispatchWebhook } from './dispatcher.js';
 import type { DbExecutor, ProcessRetriesOptions, WebhookSubscriptionRecord } from './types.js';
@@ -71,10 +71,15 @@ export async function processWebhookRetries(
 
   for (const item of deliveriesToRetry) {
     try {
+      const subId = item.subscription_id ?? item.subscriptionId;
+      const eventId = item.event_id ?? item.eventId;
+      const eventType = item.event_type ?? item.eventType;
+      const currentAttempt = item.attempt ?? 1;
+
       const subRows = await db
         .select()
         .from(webhookSubscriptions)
-        .where(eq(webhookSubscriptions.id, item.subscription_id));
+        .where(eq(webhookSubscriptions.id, subId));
 
       if (subRows.length === 0 || subRows[0].status !== 'ACTIVE') {
         await db
@@ -86,26 +91,49 @@ export async function processWebhookRetries(
       }
 
       const subscription: WebhookSubscriptionRecord = subRows[0];
-      const nextAttempt = item.attempt + 1;
+      const nextAttempt = currentAttempt + 1;
 
       const result = await dispatchWebhook(db, {
         subscription,
-        eventId: item.event_id,
-        eventType: item.event_type,
+        eventId,
+        eventType,
         payload: typeof item.payload === 'string' ? JSON.parse(item.payload) : item.payload,
         attempt: nextAttempt,
       });
 
       if (result.success) {
+        await db
+          .update(webhookDeliveries)
+          .set({ status: 'SUCCESS', nextRetryAt: null })
+          .where(eq(webhookDeliveries.id, item.id));
         succeededCount++;
       } else if (nextAttempt >= MAX_DELIVERY_ATTEMPTS) {
+        await db
+          .update(webhookDeliveries)
+          .set({ status: 'DEAD_LETTER', nextRetryAt: null, errorMessage: result.error ?? null })
+          .where(eq(webhookDeliveries.id, item.id));
         deadLetterCount++;
+      } else {
+        // Attempt failed, but next attempt was scheduled on the newly inserted delivery row.
+        // Clear nextRetryAt on the old row so it does not loop indefinitely.
+        await db
+          .update(webhookDeliveries)
+          .set({ nextRetryAt: null })
+          .where(eq(webhookDeliveries.id, item.id));
       }
     } catch (err: any) {
       logger.error('Error during webhook retry dispatch', {
         deliveryId: item.id,
         error: err.message,
       });
+      try {
+        await db
+          .update(webhookDeliveries)
+          .set({ nextRetryAt: new Date(Date.now() + 15 * 60 * 1000), errorMessage: err.message })
+          .where(eq(webhookDeliveries.id, item.id));
+      } catch {
+        // Ignore secondary error
+      }
     }
   }
 
@@ -114,4 +142,157 @@ export async function processWebhookRetries(
     succeededCount,
     deadLetterCount,
   };
+}
+
+export interface ReplayDeadLetterResult {
+  success: boolean;
+  deliveryId: string;
+  attempt: number;
+  statusCode?: number | null;
+  error?: string;
+}
+
+export interface GetDeadLettersOptions {
+  merchantId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * Replays a failed webhook delivery stuck in DEAD_LETTER status.
+ * Re-attempts dispatch with an incremented attempt count.
+ */
+export async function replayDeadLetterDelivery(
+  db: DbExecutor,
+  deliveryId: string
+): Promise<ReplayDeadLetterResult> {
+  const deliveryRows = await db
+    .select()
+    .from(webhookDeliveries)
+    .where(eq(webhookDeliveries.id, deliveryId));
+
+  const delivery = deliveryRows[0];
+  if (!delivery) {
+    throw new Error(`Webhook delivery '${deliveryId}' not found`);
+  }
+
+  if (delivery.status !== 'DEAD_LETTER') {
+    throw new Error('Only DEAD_LETTER deliveries can be manually replayed');
+  }
+
+  const subRows = await db
+    .select()
+    .from(webhookSubscriptions)
+    .where(eq(webhookSubscriptions.id, delivery.subscriptionId));
+
+  const subscription = subRows[0];
+  if (!subscription) {
+    throw new Error(`Associated webhook subscription '${delivery.subscriptionId}' not found`);
+  }
+
+  const nextAttempt = (delivery.attempt || 0) + 1;
+  const payload = typeof delivery.payload === 'string' ? JSON.parse(delivery.payload) : delivery.payload;
+
+  const result = await dispatchWebhook(db, {
+    subscription,
+    eventId: delivery.eventId,
+    eventType: delivery.eventType as any,
+    payload,
+    attempt: nextAttempt,
+  });
+
+  if (result.success) {
+    // When manual replay succeeds, resolve the dead-lettered delivery record
+    await db
+      .update(webhookDeliveries)
+      .set({
+        status: 'SUCCESS',
+        nextRetryAt: null,
+        errorMessage: null,
+      })
+      .where(eq(webhookDeliveries.id, deliveryId));
+  } else {
+    // Record latest replay failure on the dead letter record
+    await db
+      .update(webhookDeliveries)
+      .set({
+        errorMessage: result.error ?? 'Manual replay failed',
+      })
+      .where(eq(webhookDeliveries.id, deliveryId));
+  }
+
+  return {
+    success: result.success,
+    deliveryId,
+    attempt: nextAttempt,
+    statusCode: result.statusCode,
+    error: result.error,
+  };
+}
+
+/**
+ * Lists webhook deliveries currently in the Dead Letter Queue (DLQ).
+ */
+export async function getDeadLetterDeliveries(
+  db: DbExecutor,
+  options: GetDeadLettersOptions = {}
+) {
+  const limit = options.limit ?? 50;
+  const offset = options.offset ?? 0;
+
+  if (options.merchantId) {
+    return await db
+      .select()
+      .from(webhookDeliveries)
+      .where(
+        and(
+          eq(webhookDeliveries.status, 'DEAD_LETTER'),
+          eq(webhookDeliveries.merchantId, options.merchantId)
+        )
+      )
+      .orderBy(desc(webhookDeliveries.createdAt))
+      .limit(limit)
+      .offset(offset);
+  }
+
+  return await db
+    .select()
+    .from(webhookDeliveries)
+    .where(eq(webhookDeliveries.status, 'DEAD_LETTER'))
+    .orderBy(desc(webhookDeliveries.createdAt))
+    .limit(limit)
+    .offset(offset);
+}
+
+/**
+ * Re-queues a DEAD_LETTER delivery back into RETRYING status for automated scheduler pickup.
+ */
+export async function requeueDeadLetterDelivery(
+  db: DbExecutor,
+  deliveryId: string
+): Promise<{ success: boolean; deliveryId: string }> {
+  const deliveryRows = await db
+    .select()
+    .from(webhookDeliveries)
+    .where(eq(webhookDeliveries.id, deliveryId));
+
+  const delivery = deliveryRows[0];
+  if (!delivery) {
+    throw new Error(`Webhook delivery '${deliveryId}' not found`);
+  }
+
+  if (delivery.status !== 'DEAD_LETTER') {
+    throw new Error('Only DEAD_LETTER deliveries can be re-queued');
+  }
+
+  await db
+    .update(webhookDeliveries)
+    .set({
+      status: 'RETRYING',
+      nextRetryAt: new Date(),
+      errorMessage: null,
+    })
+    .where(eq(webhookDeliveries.id, deliveryId));
+
+  return { success: true, deliveryId };
 }

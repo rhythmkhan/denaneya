@@ -34,9 +34,91 @@ DenaNeya leverages Neon's serverless architecture with compute auto-scaling and 
                                          └────────────────────────────────┘
 ```
 
-### 1.1 Connection Strings
-- **`DATABASE_URL` (Pooled)**: Routes through Neon's PgBouncer pooler. Used exclusively by Next.js API routes and serverless execution environments to prevent connection starvation.
-- **`DIRECT_URL` (Direct Compute)**: Bypasses PgBouncer and connects directly to the Postgres instance. Required for DDL schema migrations (`drizzle-kit push` / `drizzle-kit migrate`) and advisory locks.
+### 1.1 Connection Strings & Dual Topology
+- **`DATABASE_URL` / `DATABASE_POOLED_URL` (Pooled PgBouncer)**: Routes through Neon's PgBouncer transaction pooler (hostname containing `-pooler` or port `6543`). Used by Next.js API routes, server actions, and edge/lambda execution environments to prevent connection starvation under high concurrent traffic.
+- **`DIRECT_URL` (Direct Compute)**: Bypasses PgBouncer and connects directly to the dedicated Postgres compute endpoint (Singapore `ap-southeast-1`). Required for DDL schema migrations (`drizzle-kit push` / `drizzle-kit migrate`), triggers, sequence operations, and advisory locks.
+- **Automatic URL Derivation (`toDirectNeonUrl` & `toPooledNeonUrl`)**: When only `DATABASE_URL` is configured in the environment (common in standard Vercel + Neon setups), `@denaneya/database` automatically derives the unpooled direct compute endpoint for schema migrations by stripping `-pooler` and normalizing port `:6543` to `:5432`, preventing PgBouncer DDL failures. Conversely, `getPooledUrl()` ensures lambdas connect to PgBouncer.
+
+### 1.2 Neon Serverless Pooling Configuration
+The `@neondatabase/serverless` connection pool is initialized in `packages/database/src/client.ts` with serverless-tuned operational bounds:
+```typescript
+const poolOptions: PoolConfig = {
+  connectionString: targetUrl,
+  max: process.env.DB_POOL_MAX ? parseInt(process.env.DB_POOL_MAX, 10) : 10,
+  idleTimeoutMillis: process.env.DB_IDLE_TIMEOUT_MS ? parseInt(process.env.DB_IDLE_TIMEOUT_MS, 10) : 30_000,
+  connectionTimeoutMillis: process.env.DB_CONNECT_TIMEOUT_MS ? parseInt(process.env.DB_CONNECT_TIMEOUT_MS, 10) : 10_000,
+};
+```
+
+| Environment Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| `DATABASE_URL` | *None* | Primary pooled connection string (PgBouncer) |
+| `DATABASE_POOLED_URL` | *None* | Explicit override for PgBouncer connection |
+| `DIRECT_URL` | *None* | Direct compute connection string for migrations & DDL |
+| `DB_POOL_MAX` | `10` | Maximum connections per serverless container pool |
+| `DB_IDLE_TIMEOUT_MS` | `30000` | Idle connection teardown timeout (30 seconds) |
+| `DB_CONNECT_TIMEOUT_MS` | `10000` | Connection acquisition timeout (10 seconds) |
+
+### 1.3 Connection Resilience & Exponential Backoff Retry Policy
+Neon auto-suspends inactive compute endpoints to minimize cloud cost, requiring ~500ms–1500ms to awaken on cold starts. To protect all database operations from transient timeouts or connection resets, `@denaneya/database` employs an automated retry policy wired directly into `Pool.query`, `Pool.connect`, and the `drizzle` client instance:
+- **Pool-Level Automatic Retry**:
+  Every query executed against `@neondatabase/serverless` `Pool` transparently retries on transient connection drops or endpoint wakeups with exponential backoff and randomized jitter (+/- 20%).
+- **Retryable Transient Conditions**:
+  - PostgreSQL & PgBouncer error codes: `ECONNRESET`, `ECONNREFUSED`, `ETIMEDOUT`, `EPIPE`, `ENOTFOUND`, `08000`, `08003`, `08006` (connection failure), `40001` (serialization failure), `53300` (too many connections), `53400` (configuration limit exceeded), `57P01` (admin shutdown), `57P02`, `57P03`.
+  - Neon-specific events: `NeonDbError`, `WebSocket connection closed`, `Compute is suspended, waking up endpoint`, `Endpoint disabled`, HTTP 503 / 504 / 429, PgBouncer `slow reconnect`, `max_client_conn`, `server conn crashed`.
+- **Exponential Backoff Formula**:
+  $$\text{Delay} = \min\left(\text{maxDelayMs}, \text{initialDelayMs} \times 2^{\text{attempt} - 1}\right) \times (0.8 + 0.4 \times \text{random}())$$
+  - Default: 3 retries, starting at 100ms with 2x multiplier, capped at 3000ms with ±20% jitter.
+
+### 1.4 Resilient In-Memory Fallback Storage
+In test runners, preview environments, or developer sandbox setups where `DATABASE_URL` is unset, malformed, or offline:
+- The database package **never crashes or throws a 500 error on cold start**.
+- It gracefully falls back to a high-fidelity **simulated in-memory storage engine** (`packages/database/src/in-memory.ts`).
+- Features full in-memory relational CRUD, primary key index deduplication, atomic transaction isolation with rollback on error, `SELECT 1` ping support, parenthesized Boolean operator precedence (AND > OR) preventing cross-tenant data leaks, and `IN (...)`, `LIKE`, `ILIKE` operators.
+- In-memory state can be isolated or preloaded via `resetInMemoryStore()` and `seedInMemoryStore()`.
+- If `DATABASE_URL` is injected post cold-start, `getDb()` dynamically detects it and seamlessly reconnects to the live database.
+
+### 1.5 Dedicated Database Health Probe (`/api/v1/health/db`)
+A dedicated health endpoint monitors live database connectivity and latency:
+- **Route**: `GET /api/v1/health/db`
+- **Response Format**:
+  ```json
+  {
+    "status": "UP",
+    "latencyMs": 18,
+    "timestamp": "2026-09-15T03:30:00.000Z",
+    "mode": "neon-pooled",
+    "host": "ep-denaneya-pooler.ap-southeast-1.aws.neon.tech",
+    "message": "Database connection healthy (18ms)."
+  }
+  ```
+- **Status Classification**:
+  - `UP` (HTTP 200): Live PostgreSQL connected with latency < 500ms.
+  - `DEGRADED` (HTTP 200): Live PostgreSQL connected with elevated latency (>= 500ms) or after connection retry.
+  - `MOCK` (HTTP 200): Operating on fallback simulated in-memory storage (zero 500 error guarantee).
+  - `DOWN` (HTTP 503): Database probe failed all retry attempts.
+
+### 1.6 Client Factory Usage Guide
+```typescript
+import {
+  db,                   // Resilient singleton Proxy (never null, dynamically bound)
+  getDb,                // Cached singleton accessor with dynamic reconnect
+  createDbClient,       // Factory with custom options
+  createPooledDbClient, // Explicitly binds to pooled URL
+  createDirectDbClient, // Explicitly binds to direct URL (migrations)
+  checkDatabaseHealth,  // Probes client and returns health status
+  withRetry,            // Standalone exponential backoff retry helper
+} from '@denaneya/database';
+
+// Example 1: Probing connection health
+const health = await checkDatabaseHealth(db);
+console.log(`Database status: ${health.status} (${health.latencyMs}ms) via ${health.mode}`);
+
+// Example 2: Explicit resilient retry on a critical multi-step workflow
+const result = await withRetry(async () => {
+  return await db.select().from(merchants).where(eq(merchants.id, 'mch_123'));
+}, { maxRetries: 3 });
+```
 
 ---
 
