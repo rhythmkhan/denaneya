@@ -49,6 +49,10 @@ export async function simulateSuccessAction(paymentId: string) {
     }
   }
 
+  if (!payment) {
+    throw new Error('Payment not found');
+  }
+
   const providerTrxId = 'SIM_' + Date.now().toString(36).toUpperCase();
 
   await settlePaymentAtomic(db, {
